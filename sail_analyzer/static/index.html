@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ILCA Sail Analyzer — Copa de España 2025</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>⛵ Sail Analyzer <small>Copa de España ILCA 7 2025</small></h1>
+  <div class="ctrl">Race
+    <select id="raceSel"></select>
+  </div>
+  <div class="ctrl">Focus
+    <select id="focusSel"></select>
+  </div>
+  <div class="ctrl">Compare vs
+    <select id="partnerSel"><option value="">— fleet only —</option></select>
+  </div>
+  <div class="windbadge">
+    <span>Est. wind</span><b id="windVal">–</b>
+    <svg id="windArrow" width="26" height="26" viewBox="0 0 26 26">
+      <g id="windG"><path d="M13 3 L13 21 M13 21 L9 16 M13 21 L17 16"
+         stroke="#58a6ff" stroke-width="2.2" fill="none" stroke-linecap="round"/></g>
+    </svg>
+  </div>
+</header>
+
+<main>
+  <section id="mapwrap">
+    <canvas id="map"></canvas>
+    <div id="maptools">
+      <button data-mode="tack" class="on">Color: Tack</button>
+      <button data-mode="speed">Speed</button>
+      <button data-mode="vmg">VMG</button>
+      <button id="fitBtn">Fit</button>
+      <button id="fleetBtn" class="on">Fleet dots</button>
+    </div>
+    <div id="hover"></div>
+    <div class="legendrow" id="legend"></div>
+    <div id="scrub">
+      <button id="playBtn">▶</button>
+      <span class="tlabel" id="tLabel">00:00</span>
+      <input type="range" id="timeRange" min="0" max="100" value="0">
+      <span class="tlabel" id="tEnd">00:00</span>
+    </div>
+  </section>
+
+  <section id="panel">
+    <nav class="tabs" id="tabs">
+      <button data-tab="overview" class="on">Overview</button>
+      <button data-tab="speed">Speed</button>
+      <button data-tab="vmg">VMG</button>
+      <button data-tab="wind">Wind &amp; Shifts</button>
+      <button data-tab="maneuvers">Maneuvers</button>
+      <button data-tab="start">Start</button>
+      <button data-tab="position">Position</button>
+    </nav>
+    <div class="tabbody" id="tabbody"></div>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

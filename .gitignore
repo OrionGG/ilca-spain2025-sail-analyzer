@@ -1,0 +1,13 @@
+# Generated analysis cache (regenerated from KML on first run)
+sail_analyzer/cache/
+
+# Claude Code local config
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+Thumbs.db
+.DS_Store

@@ -1,0 +1,433 @@
+"""
+regatta.py — GPS track analytics engine for ILCA / dinghy racing.
+
+Input: TracTrac native KML exports (position + UTC timestamp at ~3s).
+Everything else (speed, course, wind, VMG, tacks, legs, start, ranking)
+is *derived* from position+time. There is NO instrument or IMU data in
+these files, so heel / fore-aft trim are intentionally not produced.
+
+Pure-ish: uses numpy. Designed to be called by app.py (the local server).
+"""
+
+from __future__ import annotations
+
+import glob
+import math
+import os
+import re
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from functools import lru_cache
+
+import numpy as np
+
+KN = 1.94384            # m/s -> knots
+ILCA_LOA = 4.2          # boat length (m), used for "boatlengths lost"
+KML_NS = "{http://www.opengis.net/kml/2.2}"
+
+
+# --------------------------------------------------------------------------- #
+# Parsing
+# --------------------------------------------------------------------------- #
+def _parse_ts(s: str) -> float:
+    # "2025-09-19T10:45:01Z" -> epoch seconds (UTC)
+    dt = datetime.strptime(s.strip(), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
+def parse_kml(path: str):
+    """Return (t[N] epoch s, lat[N], lon[N]) sorted by time, deduped."""
+    t, lat, lon = [], [], []
+    # Stream-parse: files are flat lists of <Placemark><TimeStamp><when>..</when>
+    # <Point><coordinates>lon,lat,alt</coordinates>.
+    for _, elem in ET.iterparse(path, events=("end",)):
+        if elem.tag == KML_NS + "Placemark":
+            when = elem.find(f"{KML_NS}TimeStamp/{KML_NS}when")
+            coord = elem.find(f"{KML_NS}Point/{KML_NS}coordinates")
+            if when is not None and coord is not None and when.text and coord.text:
+                try:
+                    parts = coord.text.strip().split(",")
+                    lo, la = float(parts[0]), float(parts[1])
+                    t.append(_parse_ts(when.text))
+                    lat.append(la)
+                    lon.append(lo)
+                except (ValueError, IndexError):
+                    pass
+            elem.clear()
+    if not t:
+        return np.array([]), np.array([]), np.array([])
+    t = np.array(t)
+    order = np.argsort(t)
+    t, lat, lon = t[order], np.array(lat)[order], np.array(lon)[order]
+    # dedupe identical timestamps
+    keep = np.concatenate(([True], np.diff(t) > 0))
+    return t[keep], lat[keep], lon[keep]
+
+
+# --------------------------------------------------------------------------- #
+# Geometry helpers (local ENU tangent plane, good for a few-km course)
+# --------------------------------------------------------------------------- #
+def to_xy(lat, lon, lat0, lon0):
+    """Equirectangular projection to local meters: x=East, y=North."""
+    mlat = 111320.0
+    mlon = 111320.0 * math.cos(math.radians(lat0))
+    x = (lon - lon0) * mlon
+    y = (lat - lat0) * mlat
+    return x, y, mlat, mlon
+
+
+def _circ_smooth(deg, win):
+    """Smooth an angle series (degrees) with a centered moving average."""
+    if win <= 1 or len(deg) < 3:
+        return deg
+    r = np.radians(deg)
+    cs = _movavg(np.cos(r), win)
+    sn = _movavg(np.sin(r), win)
+    return (np.degrees(np.arctan2(sn, cs))) % 360.0
+
+
+def _movavg(a, win):
+    if win <= 1 or len(a) < 3:
+        return a
+    win = int(win) | 1                       # force odd
+    pad = win // 2
+    ap = np.pad(a, pad, mode="edge")
+    k = np.ones(win) / win
+    return np.convolve(ap, k, mode="valid")
+
+
+def wrap180(deg):
+    """Wrap to (-180, 180]."""
+    return (np.asarray(deg) + 180.0) % 360.0 - 180.0
+
+
+# --------------------------------------------------------------------------- #
+# Per-boat derived track
+# --------------------------------------------------------------------------- #
+@dataclass
+class Boat:
+    sail: str
+    name: str
+    file: str
+    t: np.ndarray
+    lat: np.ndarray
+    lon: np.ndarray
+    x: np.ndarray = field(default=None)
+    y: np.ndarray = field(default=None)
+    sog: np.ndarray = field(default=None)   # knots
+    cog: np.ndarray = field(default=None)   # deg
+    vmg: np.ndarray = field(default=None)   # knots, + = to windward
+    twa: np.ndarray = field(default=None)   # deg, 0..180
+    tack: np.ndarray = field(default=None)  # +1 stbd / -1 port (rel to wind)
+
+
+def derive_kinematics(b: Boat, lat0, lon0, smooth_win=3):
+    x, y, _, _ = to_xy(b.lat, b.lon, lat0, lon0)
+    b.x, b.y = x, y
+    t = b.t
+    n = len(t)
+    if n < 2:
+        b.sog = np.zeros(n); b.cog = np.zeros(n)
+        return b
+    # centered differences for velocity
+    vx = np.gradient(x, t)        # m/s East
+    vy = np.gradient(y, t)        # m/s North
+    sog = np.hypot(vx, vy) * KN
+    cog = (np.degrees(np.arctan2(vx, vy))) % 360.0     # 0=N,90=E
+    b.sog = _movavg(sog, smooth_win)
+    b.cog = _circ_smooth(cog, smooth_win)
+    return b
+
+
+# --------------------------------------------------------------------------- #
+# Wind estimation from the track(s)
+# --------------------------------------------------------------------------- #
+def estimate_wind_dir(boats, t_ref=None):
+    """
+    Estimate true wind direction (degrees FROM) for a fleet.
+
+    Method:
+      1. Axial (doubled-angle) mean of all course vectors -> the dominant
+         windward/leeward *line* (0-180), robust to up/down ambiguity.
+      2. Orient that line geometrically: a windward/leeward race starts and
+         finishes at the LEEWARD end and the fleet's biggest excursion is
+         toward the WINDWARD mark. Wind comes FROM the windward end.
+         (Pre-start reaching along the line makes "first-3-min displacement"
+         unreliable, so we use the start->extreme excursion instead.)
+    Returns wind_from in degrees.
+    """
+    C = S = 0.0
+    for b in boats:
+        if b.sog is None or len(b.cog) < 5:
+            continue
+        # weight by speed (moving boats define the axis), ignore near-stationary
+        w = np.clip(b.sog, 0, 12)
+        a = np.radians(b.cog)
+        C += np.sum(w * np.cos(2 * a))
+        S += np.sum(w * np.sin(2 * a))
+    if C == 0 and S == 0:
+        return 0.0
+    axis = (math.degrees(math.atan2(S, C)) / 2.0) % 180.0   # 0..180 line
+    ux, uy = math.sin(math.radians(axis)), math.cos(math.radians(axis))
+
+    # orient by fleet excursion from start toward the windward extreme
+    excursions = []
+    for b in boats:
+        if b.x is None or len(b.x) < 10:
+            continue
+        p = b.x * ux + b.y * uy
+        m0 = b.t - b.t[0] <= 60
+        p0 = float(np.mean(p[m0])) if m0.any() else float(p[0])
+        far = p.max() if (p.max() - p0) > (p0 - p.min()) else p.min()
+        excursions.append(far - p0)
+    sign = 1.0
+    if excursions and np.median(excursions) < 0:
+        sign = -1.0
+    wind_from = (axis if sign > 0 else axis + 180) % 360.0
+
+    # refine: a boat cannot point within ~38 deg of the wind, so the wind is
+    # the centre of the emptiest heading arc (the upwind "no-go zone").  This is
+    # robust to tack-time imbalance (unlike a cluster-mean bisector).  Several
+    # empty arcs exist (reaching gaps), so we search only NEAR the geometric
+    # estimate above to lock onto the *upwind* gap.
+    cog = np.concatenate([b.cog[b.sog > 1.0] for b in boats if b.sog is not None])
+    refined = _nogo_center(cog, wind_from, search=48, halfwidth=33)
+    if refined is not None:
+        wind_from = refined
+    return wind_from % 360.0
+
+
+def _circ_mean(deg, w):
+    a = np.radians(deg)
+    return math.degrees(math.atan2(np.sum(w * np.sin(a)), np.sum(w * np.cos(a)))) % 360.0
+
+
+def _nogo_center(cog, coarse, search=48, halfwidth=33, minpts=40):
+    """
+    Wind FROM = centre of the emptiest +/-halfwidth heading arc, searched within
+    +/-`search` deg of `coarse`. `cog` is an array of headings (deg) for moving
+    boats. Returns None if too little data.
+    """
+    if len(cog) < minpts:
+        return None
+    h, _ = np.histogram(cog % 360, bins=np.arange(0, 361, 2))
+    k = np.ones(7) / 7                                   # circular smoothing
+    h = np.convolve(np.concatenate([h[-6:], h, h[:6]]), k, "same")[6:-6]
+    centers = np.arange(0, 360, 2)
+    best = None
+    for c in centers:
+        if abs(((c - coarse + 180) % 360) - 180) > search:
+            continue
+        d = np.abs(((centers - c + 180) % 360) - 180)
+        score = h[d <= halfwidth].sum()
+        if best is None or score < best[0]:
+            best = (score, c)
+    return float(best[1]) if best else None
+
+
+def wind_timeseries(boats, wind0, grid, win=150.0):
+    """
+    Time-varying wind direction (shift track) on a common time grid.
+
+    For each window we collect *upwind close-hauled* course vectors across
+    the fleet and take their bisector (doubled-angle axial mean oriented to
+    wind0). Falls back to wind0 where data is thin.
+    """
+    out = np.full(len(grid), wind0, float)
+    # gather all moving headings across the fleet (need both sides of the gap)
+    allt, alla = [], []
+    for b in boats:
+        if b.sog is None:
+            continue
+        m = b.sog > 1.0
+        allt.append(b.t[m]); alla.append(b.cog[m])
+    if not allt:
+        return out
+    allt = np.concatenate(allt); alla = np.concatenate(alla)
+    for i, tc in enumerate(grid):
+        m = np.abs(allt - tc) <= win / 2
+        # track shifts: search a tight window around the running wind estimate
+        c = _nogo_center(alla[m], wind0, search=30, halfwidth=30, minpts=30)
+        if c is not None:
+            out[i] = c
+    return _circ_smooth(out, 5)
+
+
+def apply_wind(b: Boat, wind_from):
+    """Compute TWA, VMG (to windward, knots), and tack side."""
+    rel = wrap180(b.cog - wind_from)        # -180..180, 0 = pointing at wind
+    b.twa = np.abs(rel)
+    b.vmg = b.sog * np.cos(np.radians(b.twa))   # + = gaining to windward
+    b.tack = np.where(rel >= 0, 1, -1)          # +1 stbd-ish / -1 port-ish
+    return b
+
+
+# --------------------------------------------------------------------------- #
+# Maneuver detection (tacks / gybes) and loss
+# --------------------------------------------------------------------------- #
+@dataclass
+class Maneuver:
+    kind: str          # "tack" | "gybe"
+    t: float           # epoch s at apex (min speed)
+    lat: float
+    lon: float
+    entry_sog: float
+    min_sog: float
+    exit_sog: float
+    sog_loss: float
+    duration: float    # s of the turn
+    recover_s: float   # s to return to ~entry speed
+    bl_lost: float     # boatlengths lost vs sailing at target VMG
+    twa_before: float
+    twa_after: float
+
+
+def detect_maneuvers(b: Boat, wind_from):
+    """Find tacks/gybes via crossings of head-to-wind / dead-downwind."""
+    rel = wrap180(b.cog - wind_from)
+    n = len(rel)
+    if n < 10:
+        return []
+    mans = []
+    # crossing of 0 => tack (through head to wind); crossing of ±180 => gybe
+    cross0 = np.where(np.sign(rel[:-1]) != np.sign(rel[1:]))[0]
+    # downwind crossing: rel jumps from near +180 to near -180 (or vice versa)
+    relshift = rel.copy()
+    jump = np.where(np.abs(np.diff(rel)) > 180)[0]   # wrap of the wrapped angle
+    events = [("tack", i) for i in cross0 if abs(rel[i]) < 90] + \
+             [("gybe", i) for i in jump]
+    events.sort(key=lambda e: e[1])
+
+    for kind, i in events:
+        # local window around the crossing
+        lo = max(0, i - 12)
+        hi = min(n, i + 13)
+        seg = b.sog[lo:hi]
+        if len(seg) < 5:
+            continue
+        japex = lo + int(np.argmin(seg))
+        # require an actual speed dip and a real direction change
+        # entry speed = median over ~15 s before turn start
+        pre = b.sog[max(0, japex - 8):max(1, japex - 2)]
+        post = b.sog[min(n - 1, japex + 2):min(n, japex + 10)]
+        if len(pre) == 0 or len(post) == 0:
+            continue
+        entry = float(np.median(pre)); exitv = float(np.median(post))
+        minv = float(b.sog[japex])
+        if entry < 1.0 or (entry - minv) < 0.3:      # not a real maneuver
+            continue
+        twa_b = float(np.median(b.twa[max(0, japex - 6):japex])) if japex > 0 else 0
+        twa_a = float(np.median(b.twa[japex:min(n, japex + 6)]))
+        # turn duration: speed below 92% of mean(entry,exit)
+        thr = 0.92 * (entry + exitv) / 2
+        l = japex
+        while l > lo and b.sog[l] < thr:
+            l -= 1
+        r = japex
+        while r < hi - 1 and b.sog[r] < thr:
+            r += 1
+        dur = float(b.t[r] - b.t[l])
+        # recovery: time after apex to reach 0.97*entry
+        rr = japex
+        while rr < n - 1 and b.sog[rr] < 0.97 * entry:
+            rr += 1
+        recover = float(b.t[rr] - b.t[japex])
+        # boatlengths lost vs sailing at target VMG through the window
+        tw = slice(l, r + 1)
+        if r > l:
+            target_vmg = max(np.median(np.abs(b.vmg[max(0, l - 4):l + 1])),
+                             np.median(np.abs(b.vmg[r:r + 5])))
+            actual = np.trapz(np.abs(b.vmg[tw]), b.t[tw]) / KN     # m made good
+            ref = target_vmg / KN * (b.t[r] - b.t[l])
+            bl = max(0.0, (ref - actual)) / ILCA_LOA
+        else:
+            bl = 0.0
+        mans.append(Maneuver(
+            kind=kind, t=float(b.t[japex]), lat=float(b.lat[japex]), lon=float(b.lon[japex]),
+            entry_sog=round(entry, 2), min_sog=round(minv, 2), exit_sog=round(exitv, 2),
+            sog_loss=round(entry - minv, 2), duration=round(dur, 1),
+            recover_s=round(recover, 1), bl_lost=round(bl, 2),
+            twa_before=round(twa_b, 0), twa_after=round(twa_a, 0),
+        ))
+    # merge maneuvers detected within 6 s of each other (debounce)
+    merged = []
+    for m in mans:
+        if merged and abs(m.t - merged[-1].t) < 6:
+            continue
+        merged.append(m)
+    return merged
+
+
+# --------------------------------------------------------------------------- #
+# Leg segmentation (upwind / downwind) from windward velocity
+# --------------------------------------------------------------------------- #
+def segment_legs(b: Boat, wind_from):
+    """Split the race into legs by the sign of smoothed windward VMG."""
+    if b.vmg is None or len(b.vmg) < 20:
+        return []
+    vw = _movavg(b.vmg, 21)         # heavily smoothed windward speed
+    sign = np.where(vw >= 0, 1, -1)
+    legs = []
+    start = 0
+    for i in range(1, len(sign)):
+        if sign[i] != sign[start] and (b.t[i] - b.t[start]) > 60:
+            # close a leg if it lasted > 60 s
+            legs.append((start, i, "upwind" if sign[start] > 0 else "downwind"))
+            start = i
+    legs.append((start, len(sign) - 1, "upwind" if sign[start] > 0 else "downwind"))
+    # drop tiny legs
+    return [L for L in legs if (b.t[L[1]] - b.t[L[0]]) > 90]
+
+
+# --------------------------------------------------------------------------- #
+# Fleet ranking over time (progress toward windward direction)
+# --------------------------------------------------------------------------- #
+def fleet_progress(boats, wind_from, grid):
+    """
+    For each boat, project position onto the wind axis (toward wind = +),
+    interpolate onto a common time grid, and rank by who is furthest to
+    windward at each instant (a proxy for race position upwind).
+    """
+    wf = math.radians(wind_from)
+    ux, uy = math.sin(wf), math.cos(wf)        # unit vector pointing UPWIND
+    prog = {}
+    for b in boats:
+        if b.x is None or len(b.x) < 2:
+            continue
+        p = b.x * ux + b.y * uy                 # along-wind coordinate (m)
+        prog[b.sail] = np.interp(grid, b.t, p, left=np.nan, right=np.nan)
+    return prog
+
+
+# --------------------------------------------------------------------------- #
+# Start line analysis (line inferred from fleet positions at the gun)
+# --------------------------------------------------------------------------- #
+def infer_start(boats, wind_from, start_t):
+    """
+    Infer the start line as the line through the fleet at the gun,
+    perpendicular to the wind. Returns line endpoints + per-boat metrics.
+    """
+    wf = math.radians(wind_from)
+    ux, uy = math.sin(wf), math.cos(wf)         # upwind unit
+    lx, ly = uy, -ux                            # along-line unit (perp to wind)
+    pts = []
+    for b in boats:
+        if b.x is None:
+            continue
+        j = int(np.argmin(np.abs(b.t - start_t)))
+        if abs(b.t[j] - start_t) <= 5:
+            pts.append((b.sail, b.x[j], b.y[j]))
+    if len(pts) < 5:
+        return None
+    xs = np.array([p[1] for p in pts]); ys = np.array([p[2] for p in pts])
+    # line position = median along-wind coord of the fleet at the gun
+    along = xs * lx + ys * ly
+    perp = xs * ux + ys * uy
+    line_perp = float(np.median(perp))
+    a0, a1 = float(np.percentile(along, 2)), float(np.percentile(along, 98))
+    # endpoints back in x,y then lat/lon done by caller
+    return {
+        "ux": ux, "uy": uy, "lx": lx, "ly": ly,
+        "line_perp": line_perp, "along_min": a0, "along_max": a1,
+    }
