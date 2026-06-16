@@ -40,13 +40,23 @@ function sampleAt(b, t){
 }
 
 // ---------- map projection ----------
+function pct(sorted,p){ const i=(sorted.length-1)*p; const lo=i|0; const f=i-lo;
+  return sorted[lo]+(sorted[Math.min(lo+1,sorted.length-1)]-sorted[lo])*f; }
 function computeView(){
-  const r=S.race; let mnLa=1e9,mxLa=-1e9,mnLo=1e9,mxLo=-1e9;
-  for(const b of r.boats){
-    for(let k=0;k<b.lat.length;k+=4){
-      if(b.lat[k]<mnLa)mnLa=b.lat[k]; if(b.lat[k]>mxLa)mxLa=b.lat[k];
-      if(b.lon[k]<mnLo)mnLo=b.lon[k]; if(b.lon[k]>mxLo)mxLo=b.lon[k];
-    }
+  const r=S.race;
+  // Frame on what is reliably on-course: the focus track (it sails the whole
+  // course), the marks and the start line. The fleet is then clipped to a robust
+  // percentile so a parked/glitched tracker km away can't blow out the view.
+  let mnLa=1e9,mxLa=-1e9,mnLo=1e9,mxLo=-1e9;
+  const inc=(la,lo)=>{ if(la<mnLa)mnLa=la; if(la>mxLa)mxLa=la; if(lo<mnLo)mnLo=lo; if(lo>mxLo)mxLo=lo; };
+  const f=S.byS[S.focus], p=S.partner?S.byS[S.partner]:null;
+  for(const b of [f,p]) if(b) for(let k=0;k<b.lat.length;k++) inc(b.lat[k],b.lon[k]);
+  if(r.marks){ for(const m of [r.marks.windward,r.marks.leeward]) if(m) inc(m[0],m[1]); }
+  if(r.start_line) for(const e of r.start_line) inc(e[0],e[1]);
+  if(mnLa>mxLa){ // fallback (no focus): robust fleet percentile
+    const las=[],los=[]; for(const b of r.boats) for(let k=0;k<b.lat.length;k+=4){ las.push(b.lat[k]); los.push(b.lon[k]); }
+    las.sort((a,b)=>a-b); los.sort((a,b)=>a-b);
+    mnLa=pct(las,0.02);mxLa=pct(las,0.98);mnLo=pct(los,0.02);mxLo=pct(los,0.98);
   }
   S.view={mnLa,mxLa,mnLo,mxLo,lat0:r.lat0,cosL:Math.cos(r.lat0*Math.PI/180)};
   layout();

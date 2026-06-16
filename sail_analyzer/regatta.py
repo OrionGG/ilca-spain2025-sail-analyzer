@@ -411,23 +411,34 @@ def infer_start(boats, wind_from, start_t):
     wf = math.radians(wind_from)
     ux, uy = math.sin(wf), math.cos(wf)         # upwind unit
     lx, ly = uy, -ux                            # along-line unit (perp to wind)
-    pts = []
+    xs, ys = [], []
     for b in boats:
         if b.x is None:
             continue
         j = int(np.argmin(np.abs(b.t - start_t)))
         if abs(b.t[j] - start_t) <= 5:
-            pts.append((b.sail, b.x[j], b.y[j]))
-    if len(pts) < 5:
+            xs.append(b.x[j]); ys.append(b.y[j])
+    if len(xs) < 5:
         return None
-    xs = np.array([p[1] for p in pts]); ys = np.array([p[2] for p in pts])
-    # line position = median along-wind coord of the fleet at the gun
+    xs = np.array(xs); ys = np.array(ys)
+
+    # Reject stragglers: some trackers report a stale/shore position at the
+    # first fix (boats parked km away at ~0 kt). Keep only boats within a robust
+    # radius of the fleet centre so the line spans the real starters, not glitches.
+    cx, cy = np.median(xs), np.median(ys)
+    dist = np.hypot(xs - cx, ys - cy)
+    mad = np.median(np.abs(dist - np.median(dist))) + 1e-6
+    keep = (dist < np.median(dist) + 4 * 1.4826 * mad) & (dist < 600.0)
+    if keep.sum() < 5:                          # fall back if too aggressive
+        keep = dist < np.percentile(dist, 85)
+    xs, ys = xs[keep], ys[keep]
+
     along = xs * lx + ys * ly
     perp = xs * ux + ys * uy
     line_perp = float(np.median(perp))
     a0, a1 = float(np.percentile(along, 2)), float(np.percentile(along, 98))
-    # endpoints back in x,y then lat/lon done by caller
     return {
         "ux": ux, "uy": uy, "lx": lx, "ly": ly,
         "line_perp": line_perp, "along_min": a0, "along_max": a1,
+        "n_starters": int(keep.sum()),
     }
