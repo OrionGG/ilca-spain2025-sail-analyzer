@@ -222,33 +222,39 @@ function drawTrackColored(b, solid, solidStroke){
   const isFocus = (solid===null);
   bgx.lineWidth=(isFocus?2.6:2.0)*DPR; bgx.lineJoin='round';
   if(!isFocus){ bgx.strokeStyle=solidStroke; drawTrackPlain(b); return; }
-  if(S.colorMode==='fleet') b._gain=computeFleetGain(b);   // gain vs fleet avg per point
+  if(S.colorMode==='fleet'){ const rf=fleetRef(); b._gain=computeGain(b,rf); }
+  else if(S.colorMode==='cmp'){ const rf=cmpRef(); b._gain=rf?computeGain(b,rf):null; }   // null = no partner
   for(let k=1;k<b.lat.length;k++){
     const [x0,y0]=proj(b.lat[k-1],b.lon[k-1]), [x1,y1]=proj(b.lat[k],b.lon[k]);
     bgx.strokeStyle=segColor(b,k);
     bgx.beginPath(); bgx.moveTo(x0,y0); bgx.lineTo(x1,y1); bgx.stroke();
   }
 }
-// Per-point gain vs the fleet median for the current leg type: upwind/downwind
-// use VMG-to-mark (downwind better = more negative VMG), reaches use SOG. >0 = ahead.
-function computeFleetGain(b){
-  const fs=S.race.fleet_stats, G=fs.t;
-  const interp=(arr,t)=>{ if(t<=G[0])return arr[0]; if(t>=G[G.length-1])return arr[G.length-1];
-    let i=0; while(i<G.length-1&&G[i+1]<t)i++; const a=arr[i],c=arr[i+1];
-    if(a==null||c==null) return a==null?c:a; return a+(c-a)*(t-G[i])/(G[i+1]-G[i]); };
+// Per-point gain vs a reference (fleet or partner) for the current leg type:
+// upwind/downwind use VMG-to-mark (downwind better = more negative VMG), reaches use SOG. >0 = ahead.
+function computeGain(b, ref){    // ref(t) -> {vmg,sog} | null
   const kind=new Array(b.lat.length).fill('upwind');
   for(const [a,c,k] of boatLegs(b)) for(let j=a;j<=c;j++) kind[j]=k;
-  const gain=new Array(b.lat.length).fill(0);
-  for(let k=0;k<b.lat.length;k++){ const fv=interp(fs.vmg_p50,b.t[k]);
-    if(kind[k]==='downwind') gain[k]=(fv!=null)?(fv-b.vmg[k]):0;
-    else if(kind[k]==='reach'){ const fsog=interp(fs.sog_p50,b.t[k]); gain[k]=(fsog!=null)?(b.sog[k]-fsog):0; }
-    else gain[k]=(fv!=null)?(b.vmg[k]-fv):0; }
+  const gain=new Array(b.lat.length).fill(null);
+  for(let k=0;k<b.lat.length;k++){ const rf=ref(b.t[k]); if(!rf) continue;
+    if(kind[k]==='downwind') gain[k]=rf.vmg-b.vmg[k];
+    else if(kind[k]==='reach') gain[k]=b.sog[k]-rf.sog;
+    else gain[k]=b.vmg[k]-rf.vmg; }
   return gain;
 }
+function fleetRef(){ const fs=S.race.fleet_stats, G=fs.t;
+  const it=(arr,t)=>{ if(t<=G[0])return arr[0]; if(t>=G[G.length-1])return arr[G.length-1];
+    let i=0; while(i<G.length-1&&G[i+1]<t)i++; const a=arr[i],c=arr[i+1];
+    if(a==null||c==null)return a==null?c:a; return a+(c-a)*(t-G[i])/(G[i+1]-G[i]); };
+  return t=>({vmg:it(fs.vmg_p50,t), sog:it(fs.sog_p50,t)}); }
+function cmpRef(){ const p=partnerB(); if(!p) return null;
+  return t=>{ const s=sampleAt(p,t); return s.inrace?{vmg:s.vmg,sog:s.sog}:null; }; }
 function segColor(b,k){
   if(S.colorMode==='tack') return b.tack[k]>0 ? '#3f9bff' : '#ff5e7a';   // stbd blue / port red
   if(S.colorMode==='speed'){ const f=Math.max(0,Math.min(1,(b.sog[k]-2)/5)); return `hsl(${(1-f)*220+10},85%,55%)`; }
-  if(S.colorMode==='fleet'){ const g=(b._gain&&b._gain[k]!=null)?b._gain[k]:0;   // green=ahead of fleet, red=behind
+  if(S.colorMode==='fleet'||S.colorMode==='cmp'){             // green=ahead, red=behind reference
+    if(!b._gain) return 'rgba(150,160,175,.55)';              // no comparison (e.g. no partner)
+    const g=b._gain[k]; if(g==null) return 'rgba(150,160,175,.5)';
     const m=0.4+0.55*Math.min(1,Math.abs(g)/1.2);
     return g>=0?`rgba(63,185,80,${m})`:`rgba(248,81,73,${m})`; }
   // vmg
@@ -724,7 +730,8 @@ function drawLegend(){
   const modes={tack:'<span><span class="dot" style="background:#3f9bff"></span>Stbd</span><span><span class="dot" style="background:#ff5e7a"></span>Port</span>',
     speed:'<span>slow</span><span class="dot" style="background:hsl(220,85%,55%)"></span>→<span class="dot" style="background:hsl(10,85%,55%)"></span><span>fast</span>',
     vmg:'<span><span class="dot" style="background:#50c8ff"></span>gaining</span><span><span class="dot" style="background:#ff7b54"></span>losing</span>',
-    fleet:'<span><span class="dot" style="background:#3fb950"></span>ahead of fleet VMG</span><span><span class="dot" style="background:#f85149"></span>behind</span>'};
+    fleet:'<span><span class="dot" style="background:#3fb950"></span>ahead of fleet VMG</span><span><span class="dot" style="background:#f85149"></span>behind</span>',
+    cmp: S.partner?`<span><span class="dot" style="background:#3fb950"></span>ahead of ${S.byS[S.partner].name}</span><span><span class="dot" style="background:#f85149"></span>behind</span>`:'<span>pick a Compare-vs boat</span>'};
   $('#legend').innerHTML=`<span><span class="dot" style="background:#f5a623"></span>You</span>`+
     (S.partner?`<span><span class="dot" style="background:#3aa0ff"></span>${S.byS[S.partner].name}</span>`:'')+
     `<span><span class="dot" style="background:#ffd166"></span>Marks</span> ${modes[S.colorMode]}`;
