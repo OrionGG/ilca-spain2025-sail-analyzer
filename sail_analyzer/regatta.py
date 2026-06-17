@@ -360,23 +360,107 @@ def detect_maneuvers(b: Boat, wind_from):
 
 
 # --------------------------------------------------------------------------- #
-# Leg segmentation (upwind / downwind) from windward velocity
+# Leg segmentation — matches the KNOWN course template (trapezoid w/ reaches)
 # --------------------------------------------------------------------------- #
-def segment_legs(b: Boat, wind_from):
-    """Split the race into legs by the sign of smoothed windward VMG."""
+# Modes: 0 = upwind, 1 = reach, 2 = downwind
+_MODE = {"U": 0, "R": 1, "D": 2}
+_KIND = {0: "upwind", 1: "reach", 2: "downwind"}
+
+
+def _mode_array(b: Boat, vw_smooth=31, twa_smooth=15, strong=1.5):
+    """
+    Per-point sailing mode (0=up, 1=reach, 2=down).
+
+    Strong windward VMG (made good fast to windward/leeward) forces up/down and
+    is robust to a few degrees of wind-estimate error (it fixes a beat whose TWA
+    reads high when the wind is slightly off). Otherwise a mid TWA marks a reach.
+    """
+    vw = _movavg(b.vmg, vw_smooth)
+    twa = _movavg(b.twa, twa_smooth)
+    up = vw > strong
+    dn = vw < -strong
+    reach = (~up) & (~dn) & (twa > 55) & (twa < 130)
+    return np.where(up, 0, np.where(dn, 2, np.where(reach, 1, np.where(vw >= 0, 0, 2))))
+
+
+def segment_legs(b: Boat, wind_from, template=("U", "R", "D", "U", "D", "R")):
+    """
+    Split the race into the legs of the KNOWN course (trapezoid w/ reaches) by
+    fitting the template's mode sequence to the track with dynamic programming.
+
+    Course: start -U-> mark1 -R-> mark2 -D-> gate -U-> mark2 -D-> gate -R->
+    finish  (Prueba 5 shortened to U,R,D,U). The DP segments [0,n) into K
+    contiguous legs labelled by the template plus a free trailing segment, so
+    post-finish sailing is dropped and no single noisy stretch can hijack a leg.
+    """
+    if b.vmg is None or len(b.t) < 30:
+        return []
+    tmpl = [_MODE[c] for c in template]
+    K = len(tmpl)
+    n = len(b.t)
+    mode = _mode_array(b)
+    # f[m][i] = number of points in [0,i) whose mode != m  (segment cost helper)
+    f = {m: np.concatenate([[0.0], np.cumsum((mode != m).astype(float))]) for m in (0, 1, 2)}
+
+    INF = float("inf")
+    g = [INF] * (n + 1); g[0] = 0.0                  # g[j]: cost of legs done so far covering [0,j)
+    back = [[0] * (n + 1) for _ in range(K)]
+    for k in range(K):
+        fm = f[tmpl[k]]
+        best_val, best_i = INF, 0
+        gnew = [INF] * (n + 1)
+        for j in range(n + 1):
+            cur = g[j] - fm[j]                       # cost(i,j,m) = fm[j]-fm[i]
+            if cur < best_val:
+                best_val, best_i = cur, j
+            gnew[j] = fm[j] + best_val
+            back[k][j] = best_i
+        g = gnew
+    # finish boundary: trailing [bK,n) is post-race. Charge it eps<1 per point so
+    # it is cheaper than MISCLASSIFYING real post-race sailing, but far costlier
+    # than correctly labelling true legs (else the all-empty solution wins).
+    eps = 0.5
+    bK = min(range(n + 1), key=lambda j: g[j] + eps * (n - j))
+    bounds = [0] * (K + 1); bounds[K] = bK
+    for k in range(K - 1, -1, -1):
+        bounds[k] = back[k][bounds[k + 1]]
+
+    legs = []
+    for k in range(K):
+        a, c = bounds[k], bounds[k + 1]
+        if c - a >= 2:
+            legs.append((a, min(c, n - 1), _KIND[tmpl[k]]))
+
+    # Trim the final leg at peak progress along its own axis: after the finish a
+    # boat turns back (to shore / milling), so projection onto the leg direction
+    # stops rising there. Stops post-race sailing inflating the last leg.
+    if legs:
+        a, c, kind = legs[-1]
+        mid = a + max(5, (c - a) // 4)
+        if mid < c:
+            ax, ay = b.x[mid] - b.x[a], b.y[mid] - b.y[a]
+            nrm = math.hypot(ax, ay)
+            if nrm > 1.0:
+                ax, ay = ax / nrm, ay / nrm
+                proj = (b.x[a:c + 1] - b.x[a]) * ax + (b.y[a:c + 1] - b.y[a]) * ay
+                cmax = a + int(np.argmax(proj))
+                if a + 2 <= cmax < c:
+                    legs[-1] = (a, cmax, kind)
+    return legs if len(legs) >= 2 else _segment_legs_vmg(b)
+
+
+def _segment_legs_vmg(b: Boat):
+    """Fallback: split by sign of smoothed windward VMG (upwind/downwind only)."""
     if b.vmg is None or len(b.vmg) < 20:
         return []
-    vw = _movavg(b.vmg, 21)         # heavily smoothed windward speed
+    vw = _movavg(b.vmg, 21)
     sign = np.where(vw >= 0, 1, -1)
-    legs = []
-    start = 0
+    legs, start = [], 0
     for i in range(1, len(sign)):
         if sign[i] != sign[start] and (b.t[i] - b.t[start]) > 60:
-            # close a leg if it lasted > 60 s
             legs.append((start, i, "upwind" if sign[start] > 0 else "downwind"))
             start = i
     legs.append((start, len(sign) - 1, "upwind" if sign[start] > 0 else "downwind"))
-    # drop tiny legs
     return [L for L in legs if (b.t[L[1]] - b.t[L[0]]) > 90]
 
 

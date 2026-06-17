@@ -81,16 +81,36 @@ def build_race(race_dir: str, race_name: str):
     wind_series = R.wind_timeseries(boats, wind_from, grid)
     progress = R.fleet_progress(boats, wind_from, grid)
 
-    # marks (windward = furthest along-wind extreme; leeward = nearest)
-    wf = np.radians(wind_from)
-    ux, uy = np.sin(wf), np.cos(wf)
-    wm_pts, lm_pts = [], []
-    for b in boats:
-        p = b.x * ux + b.y * uy
-        iw = int(np.argmax(p)); il = int(np.argmin(p))
-        wm_pts.append((b.lat[iw], b.lon[iw])); lm_pts.append((b.lat[il], b.lon[il]))
-    wm = [float(np.median([p[0] for p in wm_pts])), float(np.median([p[1] for p in wm_pts]))]
-    lm = [float(np.median([p[0] for p in lm_pts])), float(np.median([p[1] for p in lm_pts]))]
+    # known course template (trapezoid with reaches); Prueba 5 was shortened
+    template = ("U", "R", "D", "U") if race_name.strip().endswith(" 5") \
+        else ("U", "R", "D", "U", "D", "R")
+    legs_by_sail = {b.sail: R.segment_legs(b, wind_from, template) for b in boats}
+
+    # course marks from fleet leg boundaries (rounding points), robust median:
+    #   mark1 = start of leg 2; mark2 = start of legs 3 & 5; gate = start of legs 4 & 6
+    def _mark_from(leg_idxs):
+        pts = []
+        for b in boats:
+            lg = legs_by_sail[b.sail]
+            for li in leg_idxs:
+                if li < len(lg):
+                    j = lg[li][0]
+                    pts.append((b.lat[j], b.lon[j]))
+        if len(pts) < 5:
+            return None
+        return [float(np.median([p[0] for p in pts])), float(np.median([p[1] for p in pts]))]
+
+    mark1, mark2, gate = _mark_from([1]), _mark_from([2, 4]), _mark_from([3, 5])
+    # fallback to along-wind extremes if a rounding could not be located
+    wf = np.radians(wind_from); ux, uy = np.sin(wf), np.cos(wf)
+    if mark1 is None or gate is None:
+        ext = [(b.x * ux + b.y * uy, b) for b in boats]
+        if mark1 is None:
+            wp = [(b.lat[int(np.argmax(p))], b.lon[int(np.argmax(p))]) for p, b in ext]
+            mark1 = [float(np.median([q[0] for q in wp])), float(np.median([q[1] for q in wp]))]
+        if gate is None:
+            lp = [(b.lat[int(np.argmin(p))], b.lon[int(np.argmin(p))]) for p, b in ext]
+            gate = [float(np.median([q[0] for q in lp])), float(np.median([q[1] for q in lp]))]
 
     # start: gun assumed at first common timestamp (TracTrac logs from the gun)
     start_t = float(t_start)
@@ -128,7 +148,7 @@ def build_race(race_dir: str, race_name: str):
     boats_out = []
     for i, b in enumerate(sorted(boats, key=lambda x: x.sail)):
         mans = R.detect_maneuvers(b, wind_from)
-        legs = R.segment_legs(b, wind_from)
+        legs = legs_by_sail[b.sail]
         up = b.twa < 70; dn = b.twa > 110
         dist_m = float(np.sum(np.hypot(np.diff(b.x), np.diff(b.y))))
         tacks = [m for m in mans if m.kind == "tack"]
@@ -147,16 +167,18 @@ def build_race(race_dir: str, race_name: str):
             "tack_loss": round(float(np.mean([m.bl_lost for m in tacks])), 2) if tacks else None,
             "gybe_loss": round(float(np.mean([m.bl_lost for m in gybes])), 2) if gybes else None,
         }
-        # cumulative made-good course distance (m), for a continuous
-        # position ladder that survives mark roundings
-        p = b.x * ux + b.y * uy
-        course = np.zeros(len(b.t))
-        acc = 0.0
+        # cumulative made-good distance along each leg's OWN axis (handles
+        # upwind/reach/downwind uniformly) -> continuous position ladder
+        course = np.zeros(len(b.t)); acc = 0.0
         for (a, c, kind) in legs:
-            sgn = 1.0 if kind == "upwind" else -1.0
-            seg = (p[a:c + 1] - p[a]) * sgn
+            axx, ayy = b.x[c] - b.x[a], b.y[c] - b.y[a]
+            nrm = float(np.hypot(axx, ayy))
+            if c <= a or nrm < 1.0:
+                course[a:] = acc; continue
+            axx, ayy = axx / nrm, ayy / nrm
+            seg = (b.x[a:c + 1] - b.x[a]) * axx + (b.y[a:c + 1] - b.y[a]) * ayy
             course[a:c + 1] = acc + seg
-            acc += seg[-1] if len(seg) else 0.0
+            acc += float(seg[-1])
             course[c + 1:] = acc
         course_grid = np.interp(grid, b.t, course, left=np.nan, right=np.nan)
 
@@ -179,7 +201,7 @@ def build_race(race_dir: str, race_name: str):
         "start_iso": datetime.fromtimestamp(start_t, timezone.utc).isoformat(),
         "wind_from": round(float(wind_from), 0),
         "lat0": lat0, "lon0": lon0,
-        "marks": {"windward": wm, "leeward": lm},
+        "marks": {"mark1": mark1, "mark2": mark2, "gate": gate},
         "start_line": start_line,
         "wind_series": {"t": r0(grid), "dir": r1(wind_series)},
         "fleet_stats": fleet_stats,

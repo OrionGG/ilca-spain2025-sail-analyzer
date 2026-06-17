@@ -51,7 +51,7 @@ function computeView(){
   const inc=(la,lo)=>{ if(la<mnLa)mnLa=la; if(la>mxLa)mxLa=la; if(lo<mnLo)mnLo=lo; if(lo>mxLo)mxLo=lo; };
   const f=S.byS[S.focus], p=S.partner?S.byS[S.partner]:null;
   for(const b of [f,p]) if(b) for(let k=0;k<b.lat.length;k++) inc(b.lat[k],b.lon[k]);
-  if(r.marks){ for(const m of [r.marks.windward,r.marks.leeward]) if(m) inc(m[0],m[1]); }
+  if(r.marks){ for(const m of [r.marks.mark1,r.marks.mark2,r.marks.gate]) if(m) inc(m[0],m[1]); }
   if(r.start_line) for(const e of r.start_line) inc(e[0],e[1]);
   if(mnLa>mxLa){ // fallback (no focus): robust fleet percentile
     const las=[],los=[]; for(const b of r.boats) for(let k=0;k<b.lat.length;k+=4){ las.push(b.lat[k]); los.push(b.lon[k]); }
@@ -88,8 +88,8 @@ function renderBG(){
     if(b.sail===S.focus||b.sail===S.partner) continue;
     drawTrackPlain(b);
   }
-  // course marks
-  drawMark(r.marks.windward,'W'); drawMark(r.marks.leeward,'L');
+  // course marks (1 = windward, 2 = wing/reach mark, G = leeward gate)
+  if(r.marks){ drawMark(r.marks.mark1,'1'); drawMark(r.marks.mark2,'2'); drawMark(r.marks.gate,'G'); }
   if(r.start_line){
     const [a,b]=r.start_line, p1=proj(a[0],a[1]), p2=proj(b[0],b[1]);
     bgx.strokeStyle='rgba(245,166,35,.7)'; bgx.lineWidth=2*DPR;
@@ -207,7 +207,8 @@ function makeChart(parent, opts){
     if(ymin==null){ ymin=1e9;ymax=-1e9; for(const s of opts.series) for(const p of s.data){ if(p[1]==null)continue; if(p[1]<ymin)ymin=p[1]; if(p[1]>ymax)ymax=p[1]; } const pad=(ymax-ymin)*.1||1; ymin-=pad;ymax+=pad; }
     const X=t=>L+(t-xmin)/(xmax-xmin)*pw, Y=v=>T+(1-(v-ymin)/(ymax-ymin))*ph;
     // leg shading
-    if(opts.legs) for(const lg of opts.legs){ c.fillStyle = lg.up?'rgba(74,163,255,.07)':'rgba(255,123,84,.07)'; c.fillRect(X(lg.a),T,X(lg.b)-X(lg.a),ph); }
+    const SH={upwind:'rgba(74,163,255,.09)',reach:'rgba(110,220,140,.10)',downwind:'rgba(255,123,84,.09)'};
+    if(opts.legs) for(const lg of opts.legs){ c.fillStyle=SH[lg.kind]||'rgba(0,0,0,0)'; c.fillRect(X(lg.a),T,X(lg.b)-X(lg.a),ph); }
     // gridlines + y labels
     c.strokeStyle='#222a35'; c.fillStyle='#8b949e'; c.font='10px sans-serif'; c.lineWidth=1;
     for(let g=0;g<=4;g++){ const v=ymin+(ymax-ymin)*g/4, y=Y(v); c.beginPath();c.moveTo(L,y);c.lineTo(w-R,y);c.stroke(); c.fillText((opts.fmtY?opts.fmtY(v):v.toFixed(1)),2,y+3); }
@@ -244,7 +245,7 @@ function setTab(name){
 }
 function focusB(){ return S.byS[S.focus]; }
 function partnerB(){ return S.partner?S.byS[S.partner]:null; }
-function legSpans(b){ return b.legs.map(([a,c,k])=>({a:b.t[a],b:b.t[c],up:k==='upwind'})); }
+function legSpans(b){ return b.legs.map(([a,c,k])=>({a:b.t[a],b:b.t[c],kind:k})); }
 
 function fleetMedians(){
   const keys=['sog_mean','sog_up','sog_dn','twa_up','twa_dn','vmg_up','vmg_dn','n_tacks','n_gybes','tack_loss','gybe_loss','dist_nm'];
@@ -312,7 +313,7 @@ function tabSpeed(body){
     <span class="dot" style="background:#f5a623"></span> you &nbsp;
     ${p?'<span class="dot" style="background:#26d07c"></span> '+p.name+' &nbsp;':''}
     <span class="dot" style="background:#8b949e"></span> fleet median &nbsp;
-    shaded band = fleet 25–75th percentile. Blue/orange backgrounds = upwind/downwind legs.</div>`);
+    shaded band = fleet 25–75th percentile. Background = leg type: <b style="color:#6ea3ff">upwind</b> / <b style="color:#6edc8c">reach</b> / <b style="color:#ff7b54">downwind</b>.</div>`);
   // per-leg breakdown
   body.insertAdjacentHTML('beforeend','<div class="sectitle">Per-leg average speed</div>');
   let t='<table><tr><th>Leg</th><th>Type</th><th>Avg SOG</th><th>Avg VMG</th></tr>';
@@ -463,7 +464,8 @@ function tabPosition(body){
     series,legs:legSpans(f),fmtY:v=>v.toFixed(0)}));
   body.insertAdjacentHTML('beforeend',`<div class="muted" style="margin-top:8px">Position is estimated from cumulative
    distance made good along the course (made-good distance to each mark). Line going <b>up</b> = gaining places, <b>down</b>
-   = losing. This is a GPS proxy for race rank — penalties, OCS and protests aren't reflected. Blue/orange = up/down legs.</div>`);
+   = losing. This is a GPS proxy for race rank — penalties, OCS and protests aren't reflected.
+   Background = <b style="color:#6ea3ff">upwind</b> / <b style="color:#6edc8c">reach</b> / <b style="color:#ff7b54">downwind</b> legs.</div>`);
   // gains/losses summary
   const rk=rankOf(f).filter(x=>x[1]!=null);
   if(rk.length){ body.insertAdjacentHTML('beforeend',`<div class="sectitle">Summary</div>
