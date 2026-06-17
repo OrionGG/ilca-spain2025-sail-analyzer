@@ -51,7 +51,7 @@ function computeView(){
   const inc=(la,lo)=>{ if(la<mnLa)mnLa=la; if(la>mxLa)mxLa=la; if(lo<mnLo)mnLo=lo; if(lo>mxLo)mxLo=lo; };
   const f=S.byS[S.focus], p=S.partner?S.byS[S.partner]:null;
   for(const b of [f,p]) if(b) for(let k=0;k<b.lat.length;k++) inc(b.lat[k],b.lon[k]);
-  if(r.marks){ for(const m of [r.marks.mark1,r.marks.mark2,r.marks.gate]) if(m) inc(m[0],m[1]); }
+  for(const m of effMarks()) if(m.ll) inc(m.ll[0],m.ll[1]);
   if(r.start_line) for(const e of r.start_line) inc(e[0],e[1]);
   if(mnLa>mxLa){ // fallback (no focus): robust fleet percentile
     const las=[],los=[]; for(const b of r.boats) for(let k=0;k<b.lat.length;k+=4){ las.push(b.lat[k]); los.push(b.lon[k]); }
@@ -78,6 +78,24 @@ function proj(lat,lon){
   const py=map.height - (v.oy+((lat-v.mnLa))*v.scale);   // invert Y (north up)
   return [px,py];
 }
+function unproj(px,py){ const v=S.view;
+  return [ v.mnLa+((map.height-py)-v.oy)/v.scale, v.mnLo+((px-v.ox)/v.scale)/v.cosL ]; }
+
+// ---------- marks: auto-detected, user-editable (persisted per race) ----------
+function marksKey(){ return 'sa_marks_'+(S.race?S.race.race:''); }
+function effMarks(){
+  if(S._marks) return S._marks;
+  let ov=null; try{ const s=localStorage.getItem(marksKey()); if(s) ov=JSON.parse(s); }catch(e){}
+  S._marks = ov || ((S.race&&S.race.marks)?S.race.marks.map(m=>({label:m.label,ll:m.ll.slice()})):[]);
+  return S._marks;
+}
+function marksOverridden(){ try{ return !!localStorage.getItem(marksKey()); }catch(e){ return false; } }
+function saveMarks(){ try{ localStorage.setItem(marksKey(), JSON.stringify(S._marks)); }catch(e){}
+  $('#resetMarksBtn').style.display=''; }
+function resetMarks(){ try{ localStorage.removeItem(marksKey()); }catch(e){} S._marks=null;
+  $('#resetMarksBtn').style.display='none'; renderBG(); render(); }
+function nearestMark(px,py){ let bi=-1,bd=1e9; effMarks().forEach((m,i)=>{ const [x,y]=proj(m.ll[0],m.ll[1]);
+  const d=Math.hypot(x-px,y-py); if(d<bd){bd=d;bi=i;} }); return {i:bi,d:bd}; }
 
 // ---------- background layer (static tracks/marks) ----------
 function renderBG(){
@@ -88,8 +106,8 @@ function renderBG(){
     if(b.sail===S.focus||b.sail===S.partner) continue;
     drawTrackPlain(b);
   }
-  // course marks (1 = windward, 2 = wing/reach mark, G = leeward gate)
-  if(r.marks){ drawMark(r.marks.mark1,'1'); drawMark(r.marks.mark2,'2'); drawMark(r.marks.gate,'G'); }
+  // course marks (1 = windward, 2 = wing/reach, G = leeward gate, F = finish)
+  for(const m of effMarks()) drawMark(m.ll, m.label);
   if(r.start_line){
     const [a,b]=r.start_line, p1=proj(a[0],a[1]), p2=proj(b[0],b[1]);
     bgx.strokeStyle='rgba(245,166,35,.7)'; bgx.lineWidth=2*DPR;
@@ -126,8 +144,9 @@ function segColor(b,k){
 }
 function drawMark(ll,label){
   if(!ll) return; const [x,y]=proj(ll[0],ll[1]);
-  bgx.fillStyle='#ffd166'; bgx.beginPath(); bgx.arc(x,y,5*DPR,0,7); bgx.fill();
-  bgx.fillStyle='#ffd166'; bgx.font=`${11*DPR}px sans-serif`; bgx.fillText(label,x+8*DPR,y-6*DPR);
+  bgx.fillStyle='#ffd166'; bgx.beginPath(); bgx.arc(x,y,(S.editMarks?7:5)*DPR,0,7); bgx.fill();
+  if(S.editMarks){ bgx.strokeStyle='#fff'; bgx.lineWidth=1.5*DPR; bgx.stroke(); }
+  bgx.fillStyle='#ffd166'; bgx.font=`${12*DPR}px sans-serif`; bgx.fillText(label,x+9*DPR,y-7*DPR);
 }
 
 // ---------- dynamic layer (boat dots at current time) ----------
@@ -489,6 +508,7 @@ async function loadIndex(){
 async function loadRace(i){
   S.raceIdx=i; setPlaying(false);
   S.race=await (await fetch('/api/race/'+i)).json();
+  S._marks=null;                       // reload marks (auto or saved override) per race
   S.byS={}; S.race.boats.forEach(b=>S.byS[b.sail]=b);
   if(!S.byS[S.focus]) S.focus=S.race.boats[0].sail;
   if(S.partner && !S.byS[S.partner]) S.partner='';
@@ -502,6 +522,7 @@ async function loadRace(i){
   S.tMin=S.race.fleet_stats.t[0]; S.tMax=S.race.fleet_stats.t[S.race.fleet_stats.t.length-1]; S.t=S.tMin;
   $('#tEnd').textContent=fmtT(S.tMax-S.tMin);
   setWind(S.race.wind_from);
+  $('#resetMarksBtn').style.display = marksOverridden() ? '' : 'none';
   computeView(); renderBG(); render();
   drawLegend(); setTab(S.tab); syncTime();
 }
@@ -525,8 +546,22 @@ $('#fleetBtn').onclick=e=>{ S.showFleet=!S.showFleet; e.target.classList.toggle(
 document.querySelectorAll('#maptools [data-mode]').forEach(btn=>btn.onclick=()=>{
   S.colorMode=btn.dataset.mode; document.querySelectorAll('#maptools [data-mode]').forEach(b=>b.classList.toggle('on',b===btn));
   renderBG(); render(); drawLegend(); });
-map.onmousemove=e=>{ // scrub by hovering near a time? keep simple: show focus values (already live)
-};
+$('#editMarksBtn').onclick=e=>{ S.editMarks=!S.editMarks; e.target.classList.toggle('on',S.editMarks);
+  e.target.textContent=S.editMarks?'Done editing':'Edit marks';
+  map.style.cursor=S.editMarks?'pointer':'crosshair'; renderBG(); render(); };
+$('#resetMarksBtn').onclick=resetMarks;
+// ---------- mark editing (drag to move, click to add, dbl-click to delete) ----------
+let _dragMark=null;
+map.onmousedown=e=>{ if(!S.editMarks) return; const px=e.offsetX*DPR, py=e.offsetY*DPR;
+  const n=nearestMark(px,py);
+  if(n.i>=0 && n.d<18*DPR){ _dragMark=n.i; }
+  else { effMarks().push({label:'M', ll:unproj(px,py)}); _dragMark=effMarks().length-1; saveMarks(); }
+  renderBG(); render(); };
+map.onmousemove=e=>{ if(_dragMark==null) return; const px=e.offsetX*DPR, py=e.offsetY*DPR;
+  effMarks()[_dragMark].ll=unproj(px,py); renderBG(); render(); };
+addEventListener('mouseup',()=>{ if(_dragMark!=null){ _dragMark=null; saveMarks(); } });
+map.ondblclick=e=>{ if(!S.editMarks) return; const px=e.offsetX*DPR, py=e.offsetY*DPR;
+  const n=nearestMark(px,py); if(n.i>=0 && n.d<18*DPR){ effMarks().splice(n.i,1); saveMarks(); renderBG(); render(); } };
 addEventListener('resize',()=>{ if(S.race){ layout(); renderBG(); render(); S.charts.forEach(c=>c.draw()); } });
 addEventListener('keydown',e=>{ if(e.code==='Space'){e.preventDefault();setPlaying(!S.playing);}
   if(e.code==='ArrowRight'){S.t=Math.min(S.tMax,S.t+5);syncTime();} if(e.code==='ArrowLeft'){S.t=Math.max(S.tMin,S.t-5);syncTime();} });

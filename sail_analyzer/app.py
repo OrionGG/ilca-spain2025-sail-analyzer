@@ -81,36 +81,14 @@ def build_race(race_dir: str, race_name: str):
     wind_series = R.wind_timeseries(boats, wind_from, grid)
     progress = R.fleet_progress(boats, wind_from, grid)
 
-    # known course template (trapezoid with reaches); Prueba 5 was shortened
-    template = ("U", "R", "D", "U") if race_name.strip().endswith(" 5") \
-        else ("U", "R", "D", "U", "D", "R")
-    legs_by_sail = {b.sail: R.segment_legs(b, wind_from, template) for b in boats}
+    # Full trapezoid course U,R,D,U,D,R. The segmenter auto-terminates (free
+    # trailing segment), so shortened races (e.g. Prueba 6 finishes at the gate
+    # after the 2nd run = 5 legs) come out right without any per-race hardcoding.
+    legs_by_sail = {b.sail: R.segment_legs(b, wind_from) for b in boats}
 
-    # course marks from fleet leg boundaries (rounding points), robust median:
-    #   mark1 = start of leg 2; mark2 = start of legs 3 & 5; gate = start of legs 4 & 6
-    def _mark_from(leg_idxs):
-        pts = []
-        for b in boats:
-            lg = legs_by_sail[b.sail]
-            for li in leg_idxs:
-                if li < len(lg):
-                    j = lg[li][0]
-                    pts.append((b.lat[j], b.lon[j]))
-        if len(pts) < 5:
-            return None
-        return [float(np.median([p[0] for p in pts])), float(np.median([p[1] for p in pts]))]
-
-    mark1, mark2, gate = _mark_from([1]), _mark_from([2, 4]), _mark_from([3, 5])
-    # fallback to along-wind extremes if a rounding could not be located
-    wf = np.radians(wind_from); ux, uy = np.sin(wf), np.cos(wf)
-    if mark1 is None or gate is None:
-        ext = [(b.x * ux + b.y * uy, b) for b in boats]
-        if mark1 is None:
-            wp = [(b.lat[int(np.argmax(p))], b.lon[int(np.argmax(p))]) for p, b in ext]
-            mark1 = [float(np.median([q[0] for q in wp])), float(np.median([q[1] for q in wp]))]
-        if gate is None:
-            lp = [(b.lat[int(np.argmin(p))], b.lon[int(np.argmin(p))]) for p, b in ext]
-            gate = [float(np.median([q[0] for q in lp])), float(np.median([q[1] for q in lp]))]
+    # course marks at the fleet's actual rounding points (windward / wing /
+    # leeward gate / finish), located from the per-boat legs
+    marks = R.detect_marks(boats, wind_from, legs_by_sail)
 
     # start: gun assumed at first common timestamp (TracTrac logs from the gun)
     start_t = float(t_start)
@@ -201,7 +179,7 @@ def build_race(race_dir: str, race_name: str):
         "start_iso": datetime.fromtimestamp(start_t, timezone.utc).isoformat(),
         "wind_from": round(float(wind_from), 0),
         "lat0": lat0, "lon0": lon0,
-        "marks": {"mark1": mark1, "mark2": mark2, "gate": gate},
+        "marks": marks,
         "start_line": start_line,
         "wind_series": {"t": r0(grid), "dir": r1(wind_series)},
         "fleet_stats": fleet_stats,
