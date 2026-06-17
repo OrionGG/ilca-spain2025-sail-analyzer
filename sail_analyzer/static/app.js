@@ -58,7 +58,8 @@ function computeView(){
     las.sort((a,b)=>a-b); los.sort((a,b)=>a-b);
     mnLa=pct(las,0.02);mxLa=pct(las,0.98);mnLo=pct(los,0.02);mxLo=pct(los,0.98);
   }
-  S.view={mnLa,mxLa,mnLo,mxLo,lat0:r.lat0,cosL:Math.cos(r.lat0*Math.PI/180)};
+  S.view={mnLa,mxLa,mnLo,mxLo,lat0:r.lat0,cosL:Math.cos(r.lat0*Math.PI/180),
+          zoom:1,panX:0,panY:0};
   layout();
 }
 function layout(){
@@ -76,9 +77,10 @@ function proj(lat,lon){
   const v=S.view;
   const px=v.ox+((lon-v.mnLo)*v.cosL)*v.scale;
   const py=map.height - (v.oy+((lat-v.mnLa))*v.scale);   // invert Y (north up)
-  return [px,py];
+  return [ px*v.zoom+v.panX, py*v.zoom+v.panY ];          // user zoom + pan
 }
-function unproj(px,py){ const v=S.view;
+function unproj(sx,sy){ const v=S.view;
+  const px=(sx-v.panX)/v.zoom, py=(sy-v.panY)/v.zoom;
   return [ v.mnLa+((map.height-py)-v.oy)/v.scale, v.mnLo+((px-v.ox)/v.scale)/v.cosL ]; }
 
 // ---------- marks: auto-detected, user-editable (persisted per race) ----------
@@ -604,20 +606,32 @@ document.querySelectorAll('#maptools [data-mode]').forEach(btn=>btn.onclick=()=>
   renderBG(); render(); drawLegend(); });
 $('#editMarksBtn').onclick=e=>{ S.editMarks=!S.editMarks; e.target.classList.toggle('on',S.editMarks);
   e.target.textContent=S.editMarks?'Done editing':'Edit marks';
-  map.style.cursor=S.editMarks?'pointer':'crosshair'; renderBG(); render(); };
+  map.style.cursor=S.editMarks?'pointer':'grab'; renderBG(); render(); };
 $('#resetMarksBtn').onclick=resetMarks;
-// ---------- mark editing (drag to move, click to add, dbl-click to delete) ----------
-let _dragMark=null;
-map.onmousedown=e=>{ if(!S.editMarks) return; const px=e.offsetX*DPR, py=e.offsetY*DPR;
-  const n=nearestMark(px,py);
-  if(n.i>=0 && n.d<18*DPR){ _dragMark=n.i; }
-  else { effMarks().push({label:'M', ll:unproj(px,py)}); _dragMark=effMarks().length-1; saveMarks(); }
-  renderBG(); render(); };
-map.onmousemove=e=>{ if(_dragMark==null) return; const px=e.offsetX*DPR, py=e.offsetY*DPR;
-  effMarks()[_dragMark].ll=unproj(px,py); renderBG(); render(); };
-addEventListener('mouseup',()=>{ if(_dragMark!=null){ _dragMark=null; saveMarks(); afterMarksChanged(); } });
-map.ondblclick=e=>{ if(!S.editMarks) return; const px=e.offsetX*DPR, py=e.offsetY*DPR;
-  const n=nearestMark(px,py); if(n.i>=0 && n.d<18*DPR){ effMarks().splice(n.i,1); saveMarks(); afterMarksChanged(); } };
+// ---------- map zoom/pan + mark editing ----------
+// Not editing: drag = pan, wheel/double-click = zoom (centred on cursor).
+// Editing marks: drag = move mark, click empty = add, double-click = delete.
+let _dragMark=null, _pan=null;
+function zoomAt(px,py,f){ const v=S.view; if(!v) return; const z0=v.zoom, z1=Math.max(1,Math.min(40,z0*f));
+  v.panX=px-(px-v.panX)*z1/z0; v.panY=py-(py-v.panY)*z1/z0; v.zoom=z1; renderBG(); render(); }
+map.onmousedown=e=>{ const px=e.offsetX*DPR, py=e.offsetY*DPR;
+  if(S.editMarks){
+    const n=nearestMark(px,py);
+    if(n.i>=0 && n.d<18*DPR){ _dragMark=n.i; }
+    else { effMarks().push({label:'M', ll:unproj(px,py)}); _dragMark=effMarks().length-1; saveMarks(); }
+    renderBG(); render();
+  } else { _pan={mx:px,my:py,panX:S.view.panX,panY:S.view.panY}; map.style.cursor='grabbing'; } };
+map.onmousemove=e=>{ const px=e.offsetX*DPR, py=e.offsetY*DPR;
+  if(_dragMark!=null){ effMarks()[_dragMark].ll=unproj(px,py); renderBG(); render(); }
+  else if(_pan){ S.view.panX=_pan.panX+(px-_pan.mx); S.view.panY=_pan.panY+(py-_pan.my); renderBG(); render(); } };
+addEventListener('mouseup',()=>{
+  if(_dragMark!=null){ _dragMark=null; saveMarks(); afterMarksChanged(); }
+  if(_pan){ _pan=null; map.style.cursor=S.editMarks?'pointer':'grab'; } });
+map.onwheel=e=>{ e.preventDefault(); zoomAt(e.offsetX*DPR, e.offsetY*DPR, e.deltaY<0?1.15:1/1.15); };
+map.ondblclick=e=>{ const px=e.offsetX*DPR, py=e.offsetY*DPR;
+  if(S.editMarks){ const n=nearestMark(px,py);
+    if(n.i>=0 && n.d<18*DPR){ effMarks().splice(n.i,1); saveMarks(); afterMarksChanged(); } return; }
+  zoomAt(px,py,1.6); };
 addEventListener('resize',()=>{ if(S.race){ layout(); renderBG(); render(); S.charts.forEach(c=>c.draw()); } });
 addEventListener('keydown',e=>{ if(e.code==='Space'){e.preventDefault();setPlaying(!S.playing);}
   if(e.code==='ArrowRight'){S.t=Math.min(S.tMax,S.t+5);syncTime();} if(e.code==='ArrowLeft'){S.t=Math.max(S.tMin,S.t-5);syncTime();} });

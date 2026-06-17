@@ -20,7 +20,7 @@ select{background:var(--panel2);color:var(--fg);border:1px solid var(--line);
 .windbadge b{font-size:16px;color:var(--accent)}
 main{display:flex;height:calc(100vh - 49px);min-height:0}
 #mapwrap{flex:1 1 56%;position:relative;min-width:340px;background:#0a0e14}
-#map{width:100%;height:100%;display:block;cursor:crosshair}
+#map{width:100%;height:100%;display:block;cursor:grab}
 #maptools{position:absolute;top:10px;left:10px;display:flex;gap:6px;flex-wrap:wrap}
 #maptools button,#scrub button{background:var(--panel2);color:var(--fg);
   border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px}
