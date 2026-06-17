@@ -7,6 +7,7 @@ const S = {
   tMin: 0, tMax: 1, t: 0,
   playing: false, colorMode: 'tack', showFleet: true,
   view: null, tab: 'overview', charts: [],
+  legFilter: 'all', liftCmp: 'fleet',
   byS: {},                       // sail -> boat
 };
 const KN = 1.94384, ILCA = 4.2;
@@ -84,19 +85,35 @@ function unproj(sx,sy){ const v=S.view;
   const px=(sx-v.panX)/v.zoom, py=(sy-v.panY)/v.zoom;
   return [ v.mnLa+((map.height-py)-v.oy)/v.scale, v.mnLo+((px-v.ox)/v.scale)/v.cosL ]; }
 
-// ---------- marks: auto-detected, user-editable (persisted per race) ----------
-function marksKey(){ return 'sa_marks_'+(S.race?S.race.race:''); }
+// ---------- marks: auto-detected, user-editable ----------
+// Three states per race: ORIGINAL (auto-detected, from server), SAVED (an explicit
+// snapshot), and WORKING (live edits, auto-persisted so a reload keeps them).
+function marksKey(){ return 'sa_marks_'+(S.race?S.race.race:''); }       // working
+function savedKey(){ return 'sa_marksaved_'+(S.race?S.race.race:''); }   // saved snapshot
+function autoMarks(){ return (S.race&&S.race.marks)?S.race.marks.map(m=>({label:m.label,ll:m.ll.slice()})):[]; }
 function effMarks(){
   if(S._marks) return S._marks;
   let ov=null; try{ const s=localStorage.getItem(marksKey()); if(s) ov=JSON.parse(s); }catch(e){}
-  S._marks = ov || ((S.race&&S.race.marks)?S.race.marks.map(m=>({label:m.label,ll:m.ll.slice()})):[]);
+  S._marks = ov || autoMarks();
   return S._marks;
 }
 function marksOverridden(){ try{ return !!localStorage.getItem(marksKey()); }catch(e){ return false; } }
-function saveMarks(){ try{ localStorage.setItem(marksKey(), JSON.stringify(S._marks)); }catch(e){}
-  $('#resetMarksBtn').style.display=''; }
-function resetMarks(){ try{ localStorage.removeItem(marksKey()); }catch(e){} S._marks=null;
-  $('#resetMarksBtn').style.display='none'; afterMarksChanged(); }
+function hasSaved(){ try{ return !!localStorage.getItem(savedKey()); }catch(e){ return false; } }
+function saveMarks(){ try{ localStorage.setItem(marksKey(), JSON.stringify(S._marks)); }catch(e){} }  // working autosave
+function saveSnapshot(){ try{ localStorage.setItem(savedKey(), JSON.stringify(effMarks())); }catch(e){}
+  const b=$('#saveMarksBtn'); if(b){ const o=b.textContent; b.textContent='Saved ✓'; setTimeout(()=>b.textContent=o,1200); }
+  updateMarkButtons(); }
+function resetOriginal(){ try{ localStorage.removeItem(marksKey()); }catch(e){} S._marks=null; afterMarksChanged(); updateMarkButtons(); }
+function resetSaved(){ let s=null; try{ s=localStorage.getItem(savedKey()); }catch(e){}
+  if(!s) return; try{ localStorage.setItem(marksKey(), s); }catch(e){} S._marks=null; afterMarksChanged(); updateMarkButtons(); }
+function updateMarkButtons(){
+  const on=S.editMarks;
+  $('#saveMarksBtn').style.display = on?'':'none';
+  $('#resetOrigBtn').style.display = on?'':'none';
+  const rs=$('#resetSavedBtn'); rs.style.display = (on&&hasSaved())?'':'none';
+}
+function nearestMark(px,py){ let bi=-1,bd=1e9; effMarks().forEach((m,i)=>{ const [x,y]=proj(m.ll[0],m.ll[1]);
+  const d=Math.hypot(x-px,y-py); if(d<bd){bd=d;bi=i;} }); return {i:bi,d:bd}; }
 function nearestMark(px,py){ let bi=-1,bd=1e9; effMarks().forEach((m,i)=>{ const [x,y]=proj(m.ll[0],m.ll[1]);
   const d=Math.hypot(x-px,y-py); if(d<bd){bd=d;bi=i;} }); return {i:bi,d:bd}; }
 
@@ -173,7 +190,7 @@ function renderBG(){
   // course marks (1 = windward, 2 = wing/reach, G = gate, F = finish, RC/Pin = start)
   for(const m of effMarks()) drawMark(m.ll, m.label);
   // partner full track
-  if(S.partner && S.byS[S.partner]) drawTrackColored(S.byS[S.partner], 'var(--partner)', 'rgba(38,208,124,.85)');
+  if(S.partner && S.byS[S.partner]) drawTrackColored(S.byS[S.partner], 'var(--partner)', 'rgba(58,160,255,.9)');
   // focus full track (colored by mode)
   if(S.byS[S.focus]) drawTrackColored(S.byS[S.focus], null, null);
 }
@@ -187,15 +204,35 @@ function drawTrackColored(b, solid, solidStroke){
   const isFocus = (solid===null);
   bgx.lineWidth=(isFocus?2.6:2.0)*DPR; bgx.lineJoin='round';
   if(!isFocus){ bgx.strokeStyle=solidStroke; drawTrackPlain(b); return; }
+  if(S.colorMode==='fleet') b._gain=computeFleetGain(b);   // gain vs fleet avg per point
   for(let k=1;k<b.lat.length;k++){
     const [x0,y0]=proj(b.lat[k-1],b.lon[k-1]), [x1,y1]=proj(b.lat[k],b.lon[k]);
     bgx.strokeStyle=segColor(b,k);
     bgx.beginPath(); bgx.moveTo(x0,y0); bgx.lineTo(x1,y1); bgx.stroke();
   }
 }
+// Per-point gain vs the fleet median for the current leg type: upwind/downwind
+// use VMG-to-mark (downwind better = more negative VMG), reaches use SOG. >0 = ahead.
+function computeFleetGain(b){
+  const fs=S.race.fleet_stats, G=fs.t;
+  const interp=(arr,t)=>{ if(t<=G[0])return arr[0]; if(t>=G[G.length-1])return arr[G.length-1];
+    let i=0; while(i<G.length-1&&G[i+1]<t)i++; const a=arr[i],c=arr[i+1];
+    if(a==null||c==null) return a==null?c:a; return a+(c-a)*(t-G[i])/(G[i+1]-G[i]); };
+  const kind=new Array(b.lat.length).fill('upwind');
+  for(const [a,c,k] of boatLegs(b)) for(let j=a;j<=c;j++) kind[j]=k;
+  const gain=new Array(b.lat.length).fill(0);
+  for(let k=0;k<b.lat.length;k++){ const fv=interp(fs.vmg_p50,b.t[k]);
+    if(kind[k]==='downwind') gain[k]=(fv!=null)?(fv-b.vmg[k]):0;
+    else if(kind[k]==='reach'){ const fsog=interp(fs.sog_p50,b.t[k]); gain[k]=(fsog!=null)?(b.sog[k]-fsog):0; }
+    else gain[k]=(fv!=null)?(b.vmg[k]-fv):0; }
+  return gain;
+}
 function segColor(b,k){
   if(S.colorMode==='tack') return b.tack[k]>0 ? '#3f9bff' : '#ff5e7a';   // stbd blue / port red
   if(S.colorMode==='speed'){ const f=Math.max(0,Math.min(1,(b.sog[k]-2)/5)); return `hsl(${(1-f)*220+10},85%,55%)`; }
+  if(S.colorMode==='fleet'){ const g=(b._gain&&b._gain[k]!=null)?b._gain[k]:0;   // green=ahead of fleet, red=behind
+    const m=0.4+0.55*Math.min(1,Math.abs(g)/1.2);
+    return g>=0?`rgba(63,185,80,${m})`:`rgba(248,81,73,${m})`; }
   // vmg
   const f=Math.max(-1,Math.min(1,b.vmg[k]/4));
   return f>=0?`rgba(80,200,255,${.3+.6*f})`:`rgba(255,120,84,${.3+.6*-f})`;
@@ -221,7 +258,7 @@ function render(){
       ctx.fillStyle='rgba(150,165,185,.55)'; ctx.beginPath(); ctx.arc(x,y,2.6*DPR,0,7); ctx.fill();
     }
   }
-  if(S.partner&&S.byS[S.partner]) dot(S.byS[S.partner],'#26d07c',5.5);
+  if(S.partner&&S.byS[S.partner]) dot(S.byS[S.partner],'#3aa0ff',5.5);
   if(S.byS[S.focus]) dot(S.byS[S.focus],'#f5a623',6.5);
 }
 function dot(b,col,rad){
@@ -265,8 +302,17 @@ function updateHover(){
           `VMG ${s.vmg.toFixed(2)} kt<br>COG ${s.cog.toFixed(0)}°`;
     if(S.partner&&S.byS[S.partner]){
       const ps=sampleAt(S.byS[S.partner],S.t);
-      if(ps.inrace) html+=`<hr style="border-color:#2b333f;margin:5px 0">`+
-        `<span style="color:#26d07c">${S.byS[S.partner].name}</span><br>ΔSOG <b>${(s.sog-ps.sog>=0?'+':'')}${(s.sog-ps.sog).toFixed(2)}</b> kt`;
+      if(ps.inrace){
+        const dlt=(v,u,dp=2,good=null)=>{ const sign=v>=0?'+':''; const cls=good==null?'':(good?'good':'bad');
+          return `<b class="${cls}">${sign}${v.toFixed(dp)}</b>${u}`; };
+        const dCog=((s.cog-ps.cog+540)%360)-180;          // signed heading diff
+        html+=`<hr style="border-color:#2b333f;margin:5px 0">`+
+          `<span style="color:#3aa0ff">${S.byS[S.partner].name}</span><br>`+
+          `ΔSOG ${dlt(s.sog-ps.sog,' kt',2,s.sog-ps.sog>=0)}<br>`+
+          `ΔTWA ${dlt(s.twa-ps.twa,'°',0)}<br>`+
+          `ΔVMG ${dlt(s.vmg-ps.vmg,' kt',2)}<br>`+
+          `ΔCOG ${dlt(dCog,'°',0)}`;
+      }
     }
   } else html+='<span class="muted">not on course</span>';
   $('#hover').innerHTML=html;
@@ -284,35 +330,30 @@ function makeChart(parent, opts){
     let xmin=opts.xmin, xmax=opts.xmax, ymin=opts.ymin, ymax=opts.ymax;
     if(ymin==null){ ymin=1e9;ymax=-1e9; for(const s of opts.series) for(const p of s.data){ if(p[1]==null)continue; if(p[1]<ymin)ymin=p[1]; if(p[1]>ymax)ymax=p[1]; } const pad=(ymax-ymin)*.1||1; ymin-=pad;ymax+=pad; }
     const X=t=>L+(t-xmin)/(xmax-xmin)*pw, Y=v=>T+(1-(v-ymin)/(ymax-ymin))*ph;
-    // pre-start shading (track start -> gun) + gun line
     const gun=S.race&&S.race.gun_t;
-    if(gun && gun>xmin){ c.fillStyle='rgba(140,150,165,.10)';
-      c.fillRect(X(xmin),T,X(Math.min(gun,xmax))-X(xmin),ph); }
-    // leg shading
+    // gridlines + axis labels (drawn first, unclipped so labels sit in the margins)
+    c.strokeStyle='#222a35'; c.fillStyle='#8b949e'; c.font='10px sans-serif'; c.lineWidth=1;
+    for(let g=0;g<=4;g++){ const v=ymin+(ymax-ymin)*g/4, y=Y(v); c.beginPath();c.moveTo(L,y);c.lineTo(w-R,y);c.stroke(); c.fillText((opts.fmtY?opts.fmtY(v):v.toFixed(1)),2,y+3); }
+    for(let g=0;g<=5;g++){ const t=xmin+(xmax-xmin)*g/5; c.fillText(fmtT(t-S.tMin),X(t)-12,h-6); }
+    // all data drawing is clipped to the plot rect (so a zoomed leg window can't overflow)
+    c.save(); c.beginPath(); c.rect(L,T,pw,ph); c.clip();
+    if(gun && gun>xmin){ c.fillStyle='rgba(140,150,165,.10)'; c.fillRect(X(xmin),T,X(Math.min(gun,xmax))-X(xmin),ph); }
     const SH={upwind:'rgba(74,163,255,.09)',reach:'rgba(110,220,140,.10)',downwind:'rgba(255,123,84,.09)'};
     if(opts.legs) for(const lg of opts.legs){ c.fillStyle=SH[lg.kind]||'rgba(0,0,0,0)'; c.fillRect(X(lg.a),T,X(lg.b)-X(lg.a),ph); }
     if(gun && gun>xmin && gun<xmax){ c.strokeStyle='rgba(245,166,35,.55)'; c.setLineDash([3,3]);
       c.beginPath(); c.moveTo(X(gun),T); c.lineTo(X(gun),T+ph); c.stroke(); c.setLineDash([]); }
-    // gridlines + y labels
-    c.strokeStyle='#222a35'; c.fillStyle='#8b949e'; c.font='10px sans-serif'; c.lineWidth=1;
-    for(let g=0;g<=4;g++){ const v=ymin+(ymax-ymin)*g/4, y=Y(v); c.beginPath();c.moveTo(L,y);c.lineTo(w-R,y);c.stroke(); c.fillText((opts.fmtY?opts.fmtY(v):v.toFixed(1)),2,y+3); }
-    for(let g=0;g<=5;g++){ const t=xmin+(xmax-xmin)*g/5; c.fillText(fmtT(t-S.tMin),X(t)-12,h-6); }
-    // zero line
     if(ymin<0&&ymax>0){ c.strokeStyle='#3a4452'; c.beginPath();c.moveTo(L,Y(0));c.lineTo(w-R,Y(0));c.stroke(); }
-    // band
     if(opts.band){ c.fillStyle=opts.band.color||'rgba(120,135,155,.18)'; c.beginPath();
       const lo=opts.band.lo,hi=opts.band.hi; let started=false;
       for(let k=0;k<lo.length;k++){ if(hi[k][1]==null)continue; const x=X(hi[k][0]),y=Y(hi[k][1]); started?c.lineTo(x,y):c.moveTo(x,y); started=true; }
       for(let k=lo.length-1;k>=0;k--){ if(lo[k][1]==null)continue; c.lineTo(X(lo[k][0]),Y(lo[k][1])); }
       c.closePath(); c.fill();
     }
-    // lines
     for(const s of opts.series){ c.strokeStyle=s.color; c.lineWidth=s.w||1.6; c.beginPath(); let st=false;
       for(const p of s.data){ if(p[1]==null){st=false;continue;} const x=X(p[0]),y=Y(p[1]); st?c.lineTo(x,y):c.moveTo(x,y); st=true; } c.stroke(); }
-    // markers (e.g. maneuvers)
     if(opts.marks) for(const m of opts.marks){ c.fillStyle=m.color; c.beginPath(); c.arc(X(m.t),Y(m.y),3,0,7); c.fill(); }
-    // cursor
-    c.strokeStyle='rgba(245,166,35,.9)'; c.lineWidth=1; c.beginPath(); c.moveTo(X(S.t),T); c.lineTo(X(S.t),T+ph); c.stroke();
+    c.strokeStyle='rgba(245,166,35,.9)'; c.lineWidth=1; c.beginPath(); c.moveTo(X(S.t),T); c.lineTo(X(S.t),T+ph); c.stroke();  // cursor
+    c.restore();
     chart._X=X; chart._Y=Y;
   }
   const chart={draw, cursor:draw, el:cv};
@@ -320,9 +361,11 @@ function makeChart(parent, opts){
 }
 
 // ---------- tabs ----------
+const LEG_TABS=['speed','vmg','wind','maneuvers','position'];   // tabs that support a leg filter
 function setTab(name){
   S.tab=name; S.charts=[];
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===name));
+  buildLegBar();
   const body=$('#tabbody'); body.innerHTML='';
   ({overview:tabOverview,speed:tabSpeed,vmg:tabVMG,wind:tabWind,maneuvers:tabManeuvers,start:tabStart,position:tabPosition}[name])(body);
   S.charts.forEach(c=>c.draw());
@@ -330,6 +373,26 @@ function setTab(name){
 function focusB(){ return S.byS[S.focus]; }
 function partnerB(){ return S.partner?S.byS[S.partner]:null; }
 function legSpans(b){ return boatLegs(b).map(([a,c,k])=>({a:b.t[a],b:b.t[c],kind:k})); }
+
+// ---------- leg filter (drill charts/data into one leg) ----------
+function legWindow(){          // [xmin,xmax] for the current leg filter
+  if(S.legFilter==='all'||!focusB()) return [S.tMin,S.tMax];
+  const lg=boatLegs(focusB())[S.legFilter]; if(!lg) return [S.tMin,S.tMax];
+  const f=focusB(), pad=(f.t[lg[1]]-f.t[lg[0]])*0.03;
+  return [f.t[lg[0]]-pad, f.t[lg[1]]+pad];
+}
+function buildLegBar(){
+  const bar=$('#legbar');
+  if(!S.race || !LEG_TABS.includes(S.tab)){ bar.style.display='none'; return; }
+  bar.style.display='flex';
+  const COL={upwind:'#4aa3ff',reach:'#6edc8c',downwind:'#ff7b54'};
+  let h='<span>Leg:</span>'+`<span class="lp ${S.legFilter==='all'?'on':''}" data-leg="all">All</span>`;
+  boatLegs(focusB()).forEach((lg,i)=>{ h+=`<span class="lp ${S.legFilter===i?'on':''}" data-leg="${i}"
+    style="border-left:3px solid ${COL[lg[2]]}" title="${lg[2]}">${i+1}</span>`; });
+  bar.innerHTML=h;
+  bar.querySelectorAll('.lp').forEach(p=>p.onclick=()=>{
+    S.legFilter = p.dataset.leg==='all' ? 'all' : +p.dataset.leg; setTab(S.tab); });
+}
 
 function fleetMedians(){
   const keys=['sog_mean','sog_up','sog_dn','twa_up','twa_dn','vmg_up','vmg_dn','n_tacks','n_gybes','tack_loss','gybe_loss','dist_nm'];
@@ -384,78 +447,97 @@ function tabOverview(body){
 function seriesFromBoat(b, key){ return b.t.map((t,k)=>[t, b[key][k]]); }
 
 function tabSpeed(body){
-  const f=focusB(), p=partnerB(), fs=S.race.fleet_stats;
+  const f=focusB(), p=partnerB(), fs=S.race.fleet_stats, [xa,xb]=legWindow();
   body.insertAdjacentHTML('beforeend','<div class="sectitle">Speed over ground — you vs fleet vs partner</div>');
   const series=[{color:'rgba(139,148,158,.8)',w:1.3,data:fs.t.map((t,k)=>[t,fs.sog_p50[k]])},
                 {color:'#f5a623',w:2,data:seriesFromBoat(f,'sog')}];
-  if(p) series.push({color:'#26d07c',w:1.7,data:seriesFromBoat(p,'sog')});
-  const ch=makeChart(body,{h:200,xmin:S.tMin,xmax:S.tMax,series,
+  if(p) series.push({color:'#3aa0ff',w:1.7,data:seriesFromBoat(p,'sog')});
+  const ch=makeChart(body,{h:200,xmin:xa,xmax:xb,series,
     band:{lo:fs.t.map((t,k)=>[t,fs.sog_p25[k]]),hi:fs.t.map((t,k)=>[t,fs.sog_p75[k]])},
     legs:legSpans(f),fmtY:v=>v.toFixed(1)});
   S.charts.push(ch);
   body.insertAdjacentHTML('beforeend',`<div class="muted" style="margin-top:8px">
     <span class="dot" style="background:#f5a623"></span> you &nbsp;
-    ${p?'<span class="dot" style="background:#26d07c"></span> '+p.name+' &nbsp;':''}
+    ${p?'<span class="dot" style="background:#3aa0ff"></span> '+p.name+' &nbsp;':''}
     <span class="dot" style="background:#8b949e"></span> fleet median &nbsp;
     shaded band = fleet 25–75th percentile. Background = leg type: <b style="color:#6ea3ff">upwind</b> / <b style="color:#6edc8c">reach</b> / <b style="color:#ff7b54">downwind</b>.</div>`);
-  // per-leg breakdown
-  body.insertAdjacentHTML('beforeend','<div class="sectitle">Per-leg average speed</div>');
+  // per-leg breakdown (click a row to drill into that leg)
+  body.insertAdjacentHTML('beforeend','<div class="sectitle">Per-leg average speed (click a leg to drill in)</div>');
   let t='<table><tr><th>Leg</th><th>Type</th><th>Avg SOG</th><th>Avg VMG</th></tr>';
   boatLegs(f).forEach(([a,c,k],i)=>{ let ss=0,vv=0,n=0; for(let j=a;j<=c;j++){ss+=f.sog[j];vv+=f.vmg[j];n++;}
-    t+=`<tr><td>${i+1}</td><td>${k}</td><td>${(ss/n).toFixed(2)} kt</td><td>${(Math.abs(vv/n)).toFixed(2)} kt</td></tr>`; });
+    const sel=S.legFilter===i?' style="background:var(--panel2)"':'';
+    t+=`<tr class="man" data-leg="${i}"${sel}><td>${i+1}</td><td>${k}</td><td>${(ss/n).toFixed(2)} kt</td><td>${(Math.abs(vv/n)).toFixed(2)} kt</td></tr>`; });
   t+='</table>'; body.insertAdjacentHTML('beforeend',t);
+  body.querySelectorAll('tr[data-leg]').forEach(tr=>tr.onclick=()=>{
+    const i=+tr.dataset.leg; S.legFilter = (S.legFilter===i?'all':i); setTab('speed'); });
 }
 
 function tabVMG(body){
-  const f=focusB(), p=partnerB(), fs=S.race.fleet_stats;
+  const f=focusB(), p=partnerB(), fs=S.race.fleet_stats, [xa,xb]=legWindow();
   body.insertAdjacentHTML('beforeend','<div class="sectitle">VMG to windward (+ up / − down)</div>');
   const series=[{color:'rgba(139,148,158,.8)',w:1.3,data:fs.t.map((t,k)=>[t,fs.vmg_p50[k]])},
                 {color:'#f5a623',w:2,data:seriesFromBoat(f,'vmg')}];
-  if(p) series.push({color:'#26d07c',w:1.7,data:seriesFromBoat(p,'vmg')});
-  S.charts.push(makeChart(body,{h:200,xmin:S.tMin,xmax:S.tMax,series,legs:legSpans(f),fmtY:v=>v.toFixed(1)}));
+  if(p) series.push({color:'#3aa0ff',w:1.7,data:seriesFromBoat(p,'vmg')});
+  S.charts.push(makeChart(body,{h:200,xmin:xa,xmax:xb,series,legs:legSpans(f),fmtY:v=>v.toFixed(1)}));
   body.insertAdjacentHTML('beforeend','<div class="sectitle">TWA (angle to the wind) over time</div>');
-  S.charts.push(makeChart(body,{h:160,xmin:S.tMin,xmax:S.tMax,ymin:0,ymax:180,
-    series:[{color:'#f5a623',w:1.6,data:seriesFromBoat(f,'twa')}].concat(p?[{color:'#26d07c',w:1.4,data:seriesFromBoat(p,'twa')}]:[]),
+  S.charts.push(makeChart(body,{h:160,xmin:xa,xmax:xb,ymin:0,ymax:180,
+    series:[{color:'#f5a623',w:1.6,data:seriesFromBoat(f,'twa')}].concat(p?[{color:'#3aa0ff',w:1.4,data:seriesFromBoat(p,'twa')}]:[]),
     legs:legSpans(f),fmtY:v=>v.toFixed(0)+'°'}));
   body.insertAdjacentHTML('beforeend',`<div class="muted" style="margin-top:8px">VMG = the speed you actually make
    toward (or away from) the wind. Upwind you want high positive VMG; downwind, high magnitude negative VMG. TWA near
    ~40–45° is close-hauled; ~150° is a deep run. Flat TWA = consistent; spikes = maneuvers.</div>`);
 }
 
+function upwindLegsToScan(boat){
+  const legs=boatLegs(boat);
+  if(typeof S.legFilter==='number'){ const lg=legs[S.legFilter]; return (lg&&lg[2]==='upwind')?[lg]:[]; }
+  return legs.filter(l=>l[2]==='upwind');
+}
+function liftedPct(boat){          // % of upwind time on the lifted tack (vs race-mean wind)
+  const ws=S.race.wind_series, avg=med(ws.dir.filter(v=>v!=null));
+  const winAt=t=>{ const a=ws.t; let i=0; while(i<a.length-1&&a[i]<t)i++; return ws.dir[i]; };
+  let lift=0,head=0;
+  for(const lg of upwindLegsToScan(boat)){ const a=lg[0],c=lg[1];
+    for(let j=a;j<c;j++){ const w=winAt(boat.t[j]); if(w==null)continue;
+      const shift=((w-avg+540)%360)-180;
+      const lifted = boat.tack[j]>0 ? shift<0 : shift>0;
+      const dt=boat.t[j+1]-boat.t[j]; lifted?lift+=dt:head+=dt; } }
+  const tot=lift+head; return tot? lift/tot*100 : null;
+}
 function tabWind(body){
-  const f=focusB(), ws=S.race.wind_series;
+  const f=focusB(), p=partnerB(), ws=S.race.wind_series, [xa,xb]=legWindow();
   body.insertAdjacentHTML('beforeend','<div class="sectitle">Estimated wind direction (shift track)</div>');
   const avg=med(ws.dir.filter(v=>v!=null));
-  S.charts.push(makeChart(body,{h:180,xmin:S.tMin,xmax:S.tMax,
+  S.charts.push(makeChart(body,{h:180,xmin:xa,xmax:xb,
     series:[{color:'#58a6ff',w:2,data:ws.t.map((t,k)=>[t,ws.dir[k]])},
-            {color:'rgba(139,148,158,.5)',w:1,data:[[S.tMin,avg],[S.tMax,avg]]}],
+            {color:'rgba(139,148,158,.5)',w:1,data:[[xa,avg],[xb,avg]]}],
     legs:legSpans(f),fmtY:v=>v.toFixed(0)+'°'}));
   body.insertAdjacentHTML('beforeend',`<div class="muted" style="margin-top:8px">
    Wind direction is reconstructed from the fleet's upwind tacking angles in a moving window — no anemometer needed.
    Rising line = wind veering (clockwise); falling = backing. Dashed grey = race average (${avg?avg.toFixed(0):'–'}°).
    When the trace moves <b>toward</b> your current heading you've been <b>lifted</b>; away = <b>headed</b>.</div>`);
 
-  // lifted/headed scoring on upwind legs
+  // lifted/headed scoring on upwind legs, with a comparison
   body.insertAdjacentHTML('beforeend','<div class="sectitle">Were you on the lifted tack? (upwind)</div>');
-  const winAt=t=>{ const a=ws.t; let i=0; while(i<a.length-1&&a[i]<t)i++; return ws.dir[i]; };
-  let liftedTime=0,headedTime=0;
-  for(const [a,c,k] of f.legs){ if(k!=='upwind')continue;
-    for(let j=a;j<c;j++){ const w=winAt(f.t[j]); if(w==null)continue;
-      const rel=((f.cog[j]-w+540)%360)-180;       // signed angle off wind
-      const shift=((w-avg+540)%360)-180;           // wind shift vs mean
-      // on starboard (tack>0) a left shift (negative) lifts; on port a right shift lifts
-      const lifted = f.tack[j]>0 ? shift<0 : shift>0;
-      const dt=(f.t[j+1]-f.t[j]); (lifted?liftedTime+=dt:headedTime+=dt);
-    }
-  }
-  const tot=liftedTime+headedTime||1, lp=Math.round(liftedTime/tot*100);
-  body.insertAdjacentHTML('beforeend',`
-    <div class="barwrap"><span class="lbl">Lifted</span>
-      <div class="bar" style="width:${lp}%;background:var(--good)"></div><span>${lp}%</span></div>
-    <div class="barwrap"><span class="lbl">Headed</span>
-      <div class="bar" style="width:${100-lp}%;background:var(--bad)"></div><span>${100-lp}%</span></div>
-    <div class="muted">Share of upwind time spent on the favoured (lifted) tack relative to the race-mean wind.
-    Higher is better — it means you were generally sailing the headers and tacking onto lifts.</div>`);
+  if(!S.liftCmp) S.liftCmp='fleet';
+  const cmpBar=document.createElement('div'); cmpBar.className='filterbar';
+  cmpBar.innerHTML=`Compare with: <span class="pill ${S.liftCmp==='fleet'?'on':''}" data-c="fleet">fleet average</span>`+
+    (p?`<span class="pill ${S.liftCmp==='partner'?'on':''}" data-c="partner">${p.name}</span>`:'');
+  body.appendChild(cmpBar);
+  cmpBar.querySelectorAll('[data-c]').forEach(el=>el.onclick=()=>{ S.liftCmp=el.dataset.c; setTab('wind'); });
+
+  const flp=liftedPct(f);
+  let cmpLp, cmpName;
+  if(S.liftCmp==='partner' && p){ cmpLp=liftedPct(p); cmpName=p.name; }
+  else { const all=S.race.boats.map(liftedPct).filter(v=>v!=null); cmpLp=all.length?all.reduce((a,b)=>a+b,0)/all.length:null; cmpName='Fleet average'; }
+  const bar=(name,v,col)=>v==null?`<div class="muted">${name}: no upwind data for this selection.</div>`:
+    `<div class="barwrap"><span class="lbl" style="width:110px">${name}</span>
+      <div class="bar" style="width:${Math.round(v)}%;background:${col}"></div><span>${Math.round(v)}%</span></div>`;
+  body.insertAdjacentHTML('beforeend', bar('You (lifted)',flp,'var(--good)') + bar(cmpName,cmpLp,'#3aa0ff'));
+  const dlt=(flp!=null&&cmpLp!=null)?(flp-cmpLp):null;
+  body.insertAdjacentHTML('beforeend',`<div class="muted">% of upwind time on the favoured (lifted) tack relative to the
+    race-mean wind. ${dlt!=null?`You were <b class="${dlt>=0?'good':'bad'}">${dlt>=0?'+':''}${dlt.toFixed(0)} pts</b> vs ${cmpName.toLowerCase()}. `:''}
+    Higher = you sailed the headers and tacked onto the lifts.${typeof S.legFilter==='number'?' (this upwind leg only)':''}</div>`);
 }
 
 function tabManeuvers(body){
@@ -469,7 +551,8 @@ function tabManeuvers(body){
   const tableWrap=document.createElement('div'); body.appendChild(tableWrap);
   let kindF='all', qF='all', sortKey='t', sortDir=1;
   function rows(){
-    let m=f.maneuvers.slice();
+    const [xa,xb]=legWindow();
+    let m=f.maneuvers.filter(x=>x.t>=xa&&x.t<=xb);   // restrict to selected leg
     if(kindF!=='all') m=m.filter(x=>x.kind===kindF);
     if(qF!=='all'){ const sorted=m.slice().sort((a,b)=>a.bl_lost-b.bl_lost); const half=Math.ceil(sorted.length/2);
       const set=new Set((qF==='best'?sorted.slice(0,half):sorted.slice(-half))); m=m.filter(x=>set.has(x)); }
@@ -529,7 +612,7 @@ function tabStart(body){
   for(let t=t0;t<=t1;t+=3){ fdata.push([t,sampleAt(f,t).sog]); if(p)pdata.push([t,sampleAt(p,t).sog]); }
   const med2=[]; for(let t=t0;t<=t1;t+=3){ med2.push([t,med(r.boats.map(bb=>sampleAt(bb,t).sog))]); }
   S.charts.push(makeChart(body,{h:170,xmin:t0,xmax:t1,
-    series:[{color:'rgba(139,148,158,.8)',w:1.3,data:med2},{color:'#f5a623',w:2,data:fdata}].concat(p?[{color:'#26d07c',w:1.6,data:pdata}]:[]),
+    series:[{color:'rgba(139,148,158,.8)',w:1.3,data:med2},{color:'#f5a623',w:2,data:fdata}].concat(p?[{color:'#3aa0ff',w:1.6,data:pdata}]:[]),
     fmtY:v=>v.toFixed(1)}));
   body.insertAdjacentHTML('beforeend',`<div class="muted" style="margin-top:8px">Gun detected at the surge of fleet
    upwind speed, snapped to the clock minute. The line runs between the <b style="color:#ffd166">RC</b> (committee, starboard)
@@ -545,8 +628,9 @@ function tabPosition(body){
   const rankOf=(boat)=>{ const bc=C[boat.sail], out=[]; for(let k=0;k<G.length;k++){ const my=bc[k]; if(my==null){out.push([G[k],null]);continue;}
       let rank=1; for(const o of r.boats){ const v=C[o.sail][k]; if(v!=null && v>my) rank++; } out.push([G[k],rank]); } return out; };
   const series=[{color:'#f5a623',w:2,data:rankOf(f)}];
-  if(p) series.push({color:'#26d07c',w:1.7,data:rankOf(p)});
-  S.charts.push(makeChart(body,{h:220,xmin:S.tMin,xmax:S.tMax,ymin:r.boats.length+1,ymax:0,
+  if(p) series.push({color:'#3aa0ff',w:1.7,data:rankOf(p)});
+  const [xa,xb]=legWindow();
+  S.charts.push(makeChart(body,{h:220,xmin:xa,xmax:xb,ymin:r.boats.length+1,ymax:0,
     series,legs:legSpans(f),fmtY:v=>v.toFixed(0)}));
   body.insertAdjacentHTML('beforeend',`<div class="muted" style="margin-top:8px">Position is estimated from cumulative
    distance made good along the course (made-good distance to each mark). Line going <b>up</b> = gaining places, <b>down</b>
@@ -576,6 +660,7 @@ async function loadRace(i){
   S.raceIdx=i; setPlaying(false);
   S.race=await (await fetch('/api/race/'+i)).json();
   S._marks=null;                       // reload marks (auto or saved override) per race
+  S.legFilter='all';                   // reset leg drill-down for the new race
   S.byS={}; S.race.boats.forEach(b=>S.byS[b.sail]=b);
   if(!S.byS[S.focus]) S.focus=S.race.boats[0].sail;
   if(S.partner && !S.byS[S.partner]) S.partner='';
@@ -589,7 +674,7 @@ async function loadRace(i){
   S.tMin=S.race.fleet_stats.t[0]; S.tMax=S.race.fleet_stats.t[S.race.fleet_stats.t.length-1]; S.t=S.tMin;
   $('#tEnd').textContent=fmtT(S.tMax-S.tMin);
   setWind(S.race.wind_from);
-  $('#resetMarksBtn').style.display = marksOverridden() ? '' : 'none';
+  updateMarkButtons();
   applyManualMarks();                  // derive legs from saved marks if any
   computeView(); renderBG(); render();
   drawLegend(); setTab(S.tab); syncTime();
@@ -597,14 +682,15 @@ async function loadRace(i){
 function drawLegend(){
   const modes={tack:'<span><span class="dot" style="background:#3f9bff"></span>Stbd</span><span><span class="dot" style="background:#ff5e7a"></span>Port</span>',
     speed:'<span>slow</span><span class="dot" style="background:hsl(220,85%,55%)"></span>→<span class="dot" style="background:hsl(10,85%,55%)"></span><span>fast</span>',
-    vmg:'<span><span class="dot" style="background:#50c8ff"></span>gaining</span><span><span class="dot" style="background:#ff7b54"></span>losing</span>'};
+    vmg:'<span><span class="dot" style="background:#50c8ff"></span>gaining</span><span><span class="dot" style="background:#ff7b54"></span>losing</span>',
+    fleet:'<span><span class="dot" style="background:#3fb950"></span>ahead of fleet VMG</span><span><span class="dot" style="background:#f85149"></span>behind</span>'};
   $('#legend').innerHTML=`<span><span class="dot" style="background:#f5a623"></span>You</span>`+
-    (S.partner?`<span><span class="dot" style="background:#26d07c"></span>${S.byS[S.partner].name}</span>`:'')+
+    (S.partner?`<span><span class="dot" style="background:#3aa0ff"></span>${S.byS[S.partner].name}</span>`:'')+
     `<span><span class="dot" style="background:#ffd166"></span>Marks</span> ${modes[S.colorMode]}`;
 }
 
 // ---------- events ----------
-$('#focusSel').onchange=e=>{ S.focus=e.target.value; renderBG(); render(); drawLegend(); setTab(S.tab); syncTime(); };
+$('#focusSel').onchange=e=>{ S.focus=e.target.value; S.legFilter='all'; renderBG(); render(); drawLegend(); setTab(S.tab); syncTime(); };
 $('#partnerSel').onchange=e=>{ S.partner=e.target.value; renderBG(); render(); drawLegend(); setTab(S.tab); syncTime(); };
 $('#tabs').onclick=e=>{ if(e.target.dataset.tab) setTab(e.target.dataset.tab); };
 $('#playBtn').onclick=()=>setPlaying(!S.playing);
@@ -616,8 +702,10 @@ document.querySelectorAll('#maptools [data-mode]').forEach(btn=>btn.onclick=()=>
   renderBG(); render(); drawLegend(); });
 $('#editMarksBtn').onclick=e=>{ S.editMarks=!S.editMarks; e.target.classList.toggle('on',S.editMarks);
   e.target.textContent=S.editMarks?'Done editing':'Edit marks';
-  map.style.cursor=S.editMarks?'pointer':'grab'; renderBG(); render(); };
-$('#resetMarksBtn').onclick=resetMarks;
+  map.style.cursor=S.editMarks?'pointer':'grab'; updateMarkButtons(); renderBG(); render(); };
+$('#saveMarksBtn').onclick=saveSnapshot;
+$('#resetOrigBtn').onclick=resetOriginal;
+$('#resetSavedBtn').onclick=resetSaved;
 // ---------- map zoom/pan + mark editing ----------
 // Not editing: drag = pan, wheel/double-click = zoom (centred on cursor).
 // Editing marks: drag = move mark, click empty = add, double-click = delete.

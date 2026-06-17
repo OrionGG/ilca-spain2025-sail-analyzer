@@ -1,7 +1,7 @@
 :root{
   --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2b333f;
   --fg:#e6edf3; --mut:#8b949e; --accent:#58a6ff; --focus:#f5a623;
-  --partner:#26d07c; --up:#4aa3ff; --dn:#ff7b54; --grid:#222a35;
+  --partner:#3aa0ff; --up:#4aa3ff; --dn:#ff7b54; --grid:#222a35;
   --good:#3fb950; --bad:#f85149;
   font-size:14px;
 }
@@ -60,6 +60,11 @@ th{color:var(--mut);cursor:pointer;user-select:none;position:sticky;top:0;backgr
 tr.man:hover{background:var(--panel2);cursor:pointer}
 tr.tk td:first-child{border-left:3px solid var(--up)}
 tr.gy td:first-child{border-left:3px solid var(--dn)}
+.legbar{display:none;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 12px;
+  border-bottom:1px solid var(--line);background:var(--panel);font-size:12px;color:var(--mut)}
+.legbar .lp{background:var(--panel2);border:1px solid var(--line);border-radius:13px;
+  padding:3px 10px;cursor:pointer;color:var(--fg)}
+.legbar .lp.on{background:var(--accent);color:#001;border-color:var(--accent)}
 .filterbar{display:flex;gap:8px;align-items:center;margin-bottom:8px;font-size:12px;color:var(--mut);flex-wrap:wrap}
 .pill{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:3px 10px;cursor:pointer}
 .pill.on{background:var(--accent);color:#001;border-color:var(--accent)}

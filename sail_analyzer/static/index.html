@@ -34,10 +34,13 @@
       <button data-mode="tack" class="on">Color: Tack</button>
       <button data-mode="speed">Speed</button>
       <button data-mode="vmg">VMG</button>
+      <button data-mode="fleet">vs Fleet</button>
       <button id="fitBtn">Fit</button>
       <button id="fleetBtn" class="on">Fleet dots</button>
       <button id="editMarksBtn" title="Drag a mark to reposition; double-click a mark to remove. Empty-space drag pans.">Edit marks</button>
-      <button id="resetMarksBtn" style="display:none">Reset marks</button>
+      <button id="saveMarksBtn" style="display:none" title="Save the current marks as a snapshot">Save marks</button>
+      <button id="resetOrigBtn" style="display:none" title="Discard edits, back to auto-detected marks">Reset: original</button>
+      <button id="resetSavedBtn" style="display:none" title="Restore your last saved marks">Reset: saved</button>
     </div>
     <div id="hover"></div>
     <div class="legendrow" id="legend"></div>
@@ -59,6 +62,7 @@
       <button data-tab="start">Start</button>
       <button data-tab="position">Position</button>
     </nav>
+    <div class="legbar" id="legbar"></div>
     <div class="tabbody" id="tabbody"></div>
   </section>
 </main>
