@@ -17,6 +17,7 @@ let DPR = Math.min(devicePixelRatio || 1, 2);
 
 // ---------- utils ----------
 const fmtT = s => { s = Math.max(0, s|0); return String(s/60|0).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); };
+const fmtClock = ep => new Date(ep*1000).toISOString().slice(11,19)+'Z';   // HH:MM:SS UTC
 const med = a => { a = a.filter(v=>v!=null).sort((x,y)=>x-y); return a.length? a[a.length>>1] : null; };
 function angColor(deg){ return `hsl(${deg},70%,55%)`; }
 function lerp(a,b,f){ return a+(b-a)*f; }
@@ -116,7 +117,8 @@ function legsFromMarks(b){
               {ll:[M2],k:'upwind'}, {ll:G,k:'downwind'}, {ll:(F?[F]:G),k:'reach'} ];
   const n=b.lat.length, R=70;
   const md=(i,lls)=>Math.min(...lls.map(ll=>distM(b.lat[i],b.lon[i],ll[0],ll[1])));
-  const legs=[]; let start=0, prev=0;
+  const g0 = S.race.gun_t ? idxAt(b,S.race.gun_t) : 0;   // leg 1 starts at the gun
+  const legs=[]; let start=g0, prev=g0;
   for(const s of seq){
     let i=prev+1; while(i<n && md(i,s.ll)>R) i++;        // enter the mark's zone
     if(i>=n) break;
@@ -162,14 +164,14 @@ function renderBG(){
     if(b.sail===S.focus||b.sail===S.partner) continue;
     drawTrackPlain(b);
   }
-  // course marks (1 = windward, 2 = wing/reach, G = leeward gate, F = finish)
-  for(const m of effMarks()) drawMark(m.ll, m.label);
-  if(r.start_line){
-    const [a,b]=r.start_line, p1=proj(a[0],a[1]), p2=proj(b[0],b[1]);
-    bgx.strokeStyle='rgba(245,166,35,.7)'; bgx.lineWidth=2*DPR;
+  // start line drawn between the (editable) RC and Pin marks
+  const rc=markBy('RC')[0], pin=markBy('Pin')[0];
+  if(rc&&pin){ const p1=proj(rc[0],rc[1]), p2=proj(pin[0],pin[1]);
+    bgx.strokeStyle='rgba(245,166,35,.75)'; bgx.lineWidth=2*DPR;
     bgx.setLineDash([6*DPR,5*DPR]); bgx.beginPath();
-    bgx.moveTo(p1[0],p1[1]); bgx.lineTo(p2[0],p2[1]); bgx.stroke(); bgx.setLineDash([]);
-  }
+    bgx.moveTo(p1[0],p1[1]); bgx.lineTo(p2[0],p2[1]); bgx.stroke(); bgx.setLineDash([]); }
+  // course marks (1 = windward, 2 = wing/reach, G = gate, F = finish, RC/Pin = start)
+  for(const m of effMarks()) drawMark(m.ll, m.label);
   // partner full track
   if(S.partner && S.byS[S.partner]) drawTrackColored(S.byS[S.partner], 'var(--partner)', 'rgba(38,208,124,.85)');
   // focus full track (colored by mode)
@@ -207,6 +209,7 @@ function drawMark(ll,label){
 
 // ---------- dynamic layer (boat dots at current time) ----------
 function render(){
+  if(!map.width||!map.height||!bg.width||!bg.height) return;   // not laid out yet
   ctx.clearRect(0,0,map.width,map.height);
   ctx.drawImage(bg,0,0);
   const r=S.race;
@@ -281,9 +284,15 @@ function makeChart(parent, opts){
     let xmin=opts.xmin, xmax=opts.xmax, ymin=opts.ymin, ymax=opts.ymax;
     if(ymin==null){ ymin=1e9;ymax=-1e9; for(const s of opts.series) for(const p of s.data){ if(p[1]==null)continue; if(p[1]<ymin)ymin=p[1]; if(p[1]>ymax)ymax=p[1]; } const pad=(ymax-ymin)*.1||1; ymin-=pad;ymax+=pad; }
     const X=t=>L+(t-xmin)/(xmax-xmin)*pw, Y=v=>T+(1-(v-ymin)/(ymax-ymin))*ph;
+    // pre-start shading (track start -> gun) + gun line
+    const gun=S.race&&S.race.gun_t;
+    if(gun && gun>xmin){ c.fillStyle='rgba(140,150,165,.10)';
+      c.fillRect(X(xmin),T,X(Math.min(gun,xmax))-X(xmin),ph); }
     // leg shading
     const SH={upwind:'rgba(74,163,255,.09)',reach:'rgba(110,220,140,.10)',downwind:'rgba(255,123,84,.09)'};
     if(opts.legs) for(const lg of opts.legs){ c.fillStyle=SH[lg.kind]||'rgba(0,0,0,0)'; c.fillRect(X(lg.a),T,X(lg.b)-X(lg.a),ph); }
+    if(gun && gun>xmin && gun<xmax){ c.strokeStyle='rgba(245,166,35,.55)'; c.setLineDash([3,3]);
+      c.beginPath(); c.moveTo(X(gun),T); c.lineTo(X(gun),T+ph); c.stroke(); c.setLineDash([]); }
     // gridlines + y labels
     c.strokeStyle='#222a35'; c.fillStyle='#8b949e'; c.font='10px sans-serif'; c.lineWidth=1;
     for(let g=0;g<=4;g++){ const v=ymin+(ymax-ymin)*g/4, y=Y(v); c.beginPath();c.moveTo(L,y);c.lineTo(w-R,y);c.stroke(); c.fillText((opts.fmtY?opts.fmtY(v):v.toFixed(1)),2,y+3); }
@@ -491,15 +500,16 @@ function tabManeuvers(body){
 function zoomTo(t){ /* keep current view; dots will show. Could implement zoom later. */ }
 
 function tabStart(body){
-  const f=focusB(), r=S.race, st=r.start_t;
-  body.insertAdjacentHTML('beforeend','<div class="sectitle">Start performance (gun ≈ first GPS fix)</div>');
-  if(!r.start_line){ body.insertAdjacentHTML('beforeend','<div class="muted">Start line could not be inferred for this race.</div>'); return; }
+  const f=focusB(), r=S.race, st=(r.gun_t||r.start_t);
+  body.insertAdjacentHTML('beforeend',`<div class="sectitle">Start performance — gun ${fmtClock(st)} (${fmtT(st-S.tMin)} into the track)</div>`);
+  const rc=markBy('RC')[0], pin=markBy('Pin')[0];
+  const aEnd = pin || (r.start_line&&r.start_line[0]), bEnd = rc || (r.start_line&&r.start_line[1]);
+  if(!aEnd||!bEnd){ body.insertAdjacentHTML('beforeend','<div class="muted">Start line could not be inferred for this race.</div>'); return; }
   // distance to line along wind axis at gun, speed at gun, build speed over first 90s
   const wf=r.wind_from*Math.PI/180, ux=Math.sin(wf), uy=Math.cos(wf);
   const cosL=Math.cos(r.lat0*Math.PI/180);
   const toXY=(la,lo)=>[(lo-r.lon0)*111320*cosL,(la-r.lat0)*111320];
-  const a=r.start_line[0], b=r.start_line[1];
-  const [ax,ay]=toXY(a[0],a[1]); const lineperp=ax*ux+ay*uy;            // along-wind coord of line
+  const [ax,ay]=toXY(aEnd[0],aEnd[1]); const lineperp=ax*ux+ay*uy;            // along-wind coord of line
   function startMetrics(boat){ const s=sampleAt(boat,st+1); const [x,y]=toXY(s.lat,s.lon);
     const d=(x*ux+y*uy)-lineperp;  // + = above line (over early), - = behind
     return {dist:d, sog:s.sog}; }
@@ -512,19 +522,19 @@ function tabStart(body){
   const behind=fleetD.map((d,i)=>({d,i})).sort((p,q)=>q.d-p.d);
   const myRank=behind.findIndex(o=>o.i===r.boats.indexOf(f))+1;
   card(grid,'Line position',myRank+' / '+r.boats.length,'',null);
-  // speed build chart first 120s
-  body.insertAdjacentHTML('beforeend','<div class="sectitle">Speed build-up off the line (first 2 min)</div>');
-  const t0=st,t1=st+120, fdata=[],pdata=[];
+  // speed: final approach (gun-30s) + first 2 min off the line; gun line is drawn by the chart
+  body.insertAdjacentHTML('beforeend','<div class="sectitle">Speed — approach &amp; build-up (dashed line = gun)</div>');
+  const t0=Math.max(S.tMin,st-30),t1=st+120, fdata=[],pdata=[];
   const p=partnerB();
   for(let t=t0;t<=t1;t+=3){ fdata.push([t,sampleAt(f,t).sog]); if(p)pdata.push([t,sampleAt(p,t).sog]); }
-  // fleet median build
   const med2=[]; for(let t=t0;t<=t1;t+=3){ med2.push([t,med(r.boats.map(bb=>sampleAt(bb,t).sog))]); }
   S.charts.push(makeChart(body,{h:170,xmin:t0,xmax:t1,
     series:[{color:'rgba(139,148,158,.8)',w:1.3,data:med2},{color:'#f5a623',w:2,data:fdata}].concat(p?[{color:'#26d07c',w:1.6,data:pdata}]:[]),
     fmtY:v=>v.toFixed(1)}));
-  body.insertAdjacentHTML('beforeend',`<div class="muted" style="margin-top:8px">The start line is <b>inferred</b> from
-   where the fleet sits at the gun, perpendicular to the estimated wind, so treat distances as approximate. A good start =
-   on the line at the gun (≈0 m behind) at full speed, accelerating ahead of the fleet-median curve.</div>`);
+  body.insertAdjacentHTML('beforeend',`<div class="muted" style="margin-top:8px">Gun detected at the surge of fleet
+   upwind speed, snapped to the clock minute. The line runs between the <b style="color:#ffd166">RC</b> (committee, starboard)
+   and <b style="color:#ffd166">Pin</b> (port) marks — drag them in <b>Edit marks</b> to correct. Distances are approximate;
+   a good start = on the line at the gun (≈0 m behind) at full speed, accelerating ahead of the fleet-median curve.</div>`);
 }
 
 function tabPosition(body){
@@ -617,10 +627,10 @@ function zoomAt(px,py,f){ const v=S.view; if(!v) return; const z0=v.zoom, z1=Mat
 map.onmousedown=e=>{ const px=e.offsetX*DPR, py=e.offsetY*DPR;
   if(S.editMarks){
     const n=nearestMark(px,py);
-    if(n.i>=0 && n.d<18*DPR){ _dragMark=n.i; }
-    else { effMarks().push({label:'M', ll:unproj(px,py)}); _dragMark=effMarks().length-1; saveMarks(); }
-    renderBG(); render();
-  } else { _pan={mx:px,my:py,panX:S.view.panX,panY:S.view.panY}; map.style.cursor='grabbing'; } };
+    if(n.i>=0 && n.d<18*DPR){ _dragMark=n.i; renderBG(); render(); return; }   // drag an existing mark
+    // empty space in edit mode: pan (do NOT create a new mark)
+  }
+  _pan={mx:px,my:py,panX:S.view.panX,panY:S.view.panY}; map.style.cursor='grabbing'; };
 map.onmousemove=e=>{ const px=e.offsetX*DPR, py=e.offsetY*DPR;
   if(_dragMark!=null){ effMarks()[_dragMark].ll=unproj(px,py); renderBG(); render(); }
   else if(_pan){ S.view.panX=_pan.panX+(px-_pan.mx); S.view.panY=_pan.panY+(py-_pan.my); renderBG(); render(); } };

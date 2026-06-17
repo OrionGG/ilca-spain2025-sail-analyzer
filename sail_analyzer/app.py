@@ -81,32 +81,34 @@ def build_race(race_dir: str, race_name: str):
     wind_series = R.wind_timeseries(boats, wind_from, grid)
     progress = R.fleet_progress(boats, wind_from, grid)
 
-    # Full trapezoid course U,R,D,U,D,R. The segmenter auto-terminates (free
-    # trailing segment), so shortened races (e.g. Prueba 6 finishes at the gate
-    # after the 2nd run = 5 legs) come out right without any per-race hardcoding.
-    legs_by_sail = {b.sail: R.segment_legs(b, wind_from) for b in boats}
+    # The gun is a round clock-minute ~5 min after logging starts (logging begins
+    # at the warning signal; the first minutes are the pre-start). Leg 1 is
+    # anchored there so the pre-start is excluded from the race legs.
+    gun_t = R.detect_gun(boats, wind_from)
+    legs_by_sail = {b.sail: R.segment_legs(b, wind_from, gun_t=gun_t) for b in boats}
 
     # course marks at the fleet's actual rounding points (windward / wing /
     # leeward gate / finish), located from the per-boat legs
     marks = R.detect_marks(boats, wind_from, legs_by_sail)
 
-    # start: gun assumed at first common timestamp (TracTrac logs from the gun)
-    start_t = float(t_start)
+    # start line at the gun, with its ends labelled: RC (committee boat, starboard
+    # end) and Pin (port end). Starboard = +along-line (wind_from + 90 deg).
+    start_t = float(gun_t)
     startinfo = R.infer_start(boats, wind_from, start_t)
     start_line = None
     if startinfo:
         s = startinfo
-        cx = (s["along_min"] + s["along_max"]) / 2
-        # endpoints in x,y: perp coord fixed, along varies
         def xy_to_ll(px, py):
             mlat = 111320.0; mlon = 111320.0 * np.cos(np.radians(lat0))
             return [lat0 + py / mlat, lon0 + px / mlon]
         pe1 = s["line_perp"]
-        e1x = pe1 * s["ux"] + s["along_min"] * s["lx"]
-        e1y = pe1 * s["uy"] + s["along_min"] * s["ly"]
-        e2x = pe1 * s["ux"] + s["along_max"] * s["lx"]
-        e2y = pe1 * s["uy"] + s["along_max"] * s["ly"]
-        start_line = [xy_to_ll(e1x, e1y), xy_to_ll(e2x, e2y)]
+        pin = xy_to_ll(pe1 * s["ux"] + s["along_min"] * s["lx"],
+                       pe1 * s["uy"] + s["along_min"] * s["ly"])
+        rc = xy_to_ll(pe1 * s["ux"] + s["along_max"] * s["lx"],
+                      pe1 * s["uy"] + s["along_max"] * s["ly"])
+        start_line = [pin, rc]
+        marks.append({"label": "RC", "ll": rc})       # committee boat (starboard)
+        marks.append({"label": "Pin", "ll": pin})     # pin end (port)
 
     # fleet aggregate stats on the grid (resample each boat)
     sog_grid, vmg_grid = [], []
@@ -176,6 +178,7 @@ def build_race(race_dir: str, race_name: str):
     return {
         "race": race_name,
         "start_t": start_t,
+        "gun_t": float(gun_t),
         "start_iso": datetime.fromtimestamp(start_t, timezone.utc).isoformat(),
         "wind_from": round(float(wind_from), 0),
         "lat0": lat0, "lon0": lon0,

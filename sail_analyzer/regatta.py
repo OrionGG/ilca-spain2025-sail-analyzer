@@ -383,15 +383,36 @@ def _mode_array(b: Boat, vw_smooth=31, twa_smooth=15, strong=1.5):
     return np.where(up, 0, np.where(dn, 2, np.where(reach, 1, np.where(vw >= 0, 0, 2))))
 
 
-def segment_legs(b: Boat, wind_from, template=("U", "R", "D", "U", "D", "R")):
+def detect_gun(boats, wind_from):
+    """
+    Estimate the start gun. TracTrac logging begins at the warning signal, so the
+    first few minutes are the PRE-START; the gun is when the fleet stops jockeying
+    and surges upwind together. We find that onset from the fleet-median upwind
+    VMG and snap to the nearest round clock-minute (starts are set on the minute).
+    """
+    t0 = min(b.t[0] for b in boats)
+    grid = np.arange(t0, t0 + 900, 5.0)              # first 15 min
+    V = [np.interp(grid, b.t, b.vmg, left=np.nan, right=np.nan)
+         for b in boats if b.vmg is not None]
+    if not V:
+        return t0
+    Vs = _movavg(np.nanmedian(np.array(V), axis=0), 7)
+    gun = t0
+    for k in range(len(grid) - 12):
+        if Vs[k] > 1.0 and np.all(Vs[k:k + 12] > 0.3):   # sustained beating begins
+            gun = grid[k]; break
+    return float(round(gun / 60.0) * 60.0)               # snap to the clock minute
+
+
+def segment_legs(b: Boat, wind_from, template=("U", "R", "D", "U", "D", "R"), gun_t=None):
     """
     Split the race into the legs of the KNOWN course (trapezoid w/ reaches) by
     fitting the template's mode sequence to the track with dynamic programming.
 
     Course: start -U-> mark1 -R-> mark2 -D-> gate -U-> mark2 -D-> gate -R->
-    finish  (Prueba 5 shortened to U,R,D,U). The DP segments [0,n) into K
-    contiguous legs labelled by the template plus a free trailing segment, so
-    post-finish sailing is dropped and no single noisy stretch can hijack a leg.
+    finish. Leg 1 is anchored at the gun (`gun_t`) so the pre-start is excluded;
+    the DP labels the legs and a free trailing segment drops post-finish sailing,
+    so shortened races (e.g. Prueba 6 = 5 legs) fall out without hardcoding.
     """
     if b.vmg is None or len(b.t) < 30:
         return []
@@ -403,7 +424,9 @@ def segment_legs(b: Boat, wind_from, template=("U", "R", "D", "U", "D", "R")):
     f = {m: np.concatenate([[0.0], np.cumsum((mode != m).astype(float))]) for m in (0, 1, 2)}
 
     INF = float("inf")
-    g = [INF] * (n + 1); g[0] = 0.0                  # g[j]: cost of legs done so far covering [0,j)
+    g = [INF] * (n + 1)
+    g0 = 0 if gun_t is None else int(np.argmin(np.abs(b.t - gun_t)))
+    g[g0] = 0.0                                      # leg 1 starts at the gun (pre-start excluded)
     back = [[0] * (n + 1) for _ in range(K)]
     for k in range(K):
         fm = f[tmpl[k]]
