@@ -93,9 +93,63 @@ function marksOverridden(){ try{ return !!localStorage.getItem(marksKey()); }cat
 function saveMarks(){ try{ localStorage.setItem(marksKey(), JSON.stringify(S._marks)); }catch(e){}
   $('#resetMarksBtn').style.display=''; }
 function resetMarks(){ try{ localStorage.removeItem(marksKey()); }catch(e){} S._marks=null;
-  $('#resetMarksBtn').style.display='none'; renderBG(); render(); }
+  $('#resetMarksBtn').style.display='none'; afterMarksChanged(); }
 function nearestMark(px,py){ let bi=-1,bd=1e9; effMarks().forEach((m,i)=>{ const [x,y]=proj(m.ll[0],m.ll[1]);
   const d=Math.hypot(x-px,y-py); if(d<bd){bd=d;bi=i;} }); return {i:bi,d:bd}; }
+
+// ---------- legs derived from the (possibly hand-placed) marks ----------
+function toXY(lat,lon){ const r=S.race, cosL=Math.cos(r.lat0*Math.PI/180);
+  return [(lon-r.lon0)*111320*cosL, (lat-r.lat0)*111320]; }
+function distM(la1,lo1,la2,lo2){ const cosL=Math.cos(la1*Math.PI/180);
+  return Math.hypot((lo1-lo2)*111320*cosL,(la1-la2)*111320); }
+function markBy(label){ return effMarks().filter(m=>m.label===label).map(m=>m.ll); }
+
+// Course rounding order: start -U-> M1 -R-> M2 -D-> gate -U-> M2 -D-> gate -R-> finish.
+// For a boat, each leg ends at the closest approach to its target mark; if a
+// later mark is never reached (shortened race / retirement) we stop there.
+function legsFromMarks(b){
+  const M1=markBy('1')[0], M2=markBy('2')[0], G=markBy('G'), F=markBy('F')[0];
+  if(!M1||!M2||!G.length) return null;
+  const seq=[ {ll:[M1],k:'upwind'}, {ll:[M2],k:'reach'}, {ll:G,k:'downwind'},
+              {ll:[M2],k:'upwind'}, {ll:G,k:'downwind'}, {ll:(F?[F]:G),k:'reach'} ];
+  const n=b.lat.length, R=70;
+  const md=(i,lls)=>Math.min(...lls.map(ll=>distM(b.lat[i],b.lon[i],ll[0],ll[1])));
+  const legs=[]; let start=0, prev=0;
+  for(const s of seq){
+    let i=prev+1; while(i<n && md(i,s.ll)>R) i++;        // enter the mark's zone
+    if(i>=n) break;
+    let bi=i, bd=md(i,s.ll);
+    while(i<n && md(i,s.ll)<=R*1.6){ const d=md(i,s.ll); if(d<bd){bd=d;bi=i;} i++; }  // closest pt in pass
+    if(bi-start<2) break;                                 // degenerate (e.g. finish == gate)
+    legs.push([start,bi,s.k]); start=bi; prev=bi;
+  }
+  return legs.length>=2 ? legs : null;
+}
+function courseFromLegs(b,legs){      // cumulative made-good along each leg axis, on the grid
+  const n=b.lat.length, course=new Array(n).fill(0); let acc=0;
+  for(const [a,c] of legs){
+    const [x0,y0]=toXY(b.lat[a],b.lon[a]), [x1,y1]=toXY(b.lat[c],b.lon[c]);
+    let dx=x1-x0, dy=y1-y0; const nrm=Math.hypot(dx,dy);
+    if(c<=a||nrm<1){ for(let i=a;i<n;i++)course[i]=acc; continue; }
+    dx/=nrm; dy/=nrm;
+    for(let i=a;i<=c;i++){ const [x,y]=toXY(b.lat[i],b.lon[i]); course[i]=acc+((x-x0)*dx+(y-y0)*dy); }
+    acc=course[c]; for(let i=c+1;i<n;i++)course[i]=acc;
+  }
+  return S.race.fleet_stats.t.map(t=>{ if(t<b.t[0]||t>b.t[n-1]) return null;
+    const i=idxAt(b,t), j=Math.min(i+1,n-1), f=b.t[j]>b.t[i]?(t-b.t[i])/(b.t[j]-b.t[i]):0;
+    return course[i]+(course[j]-course[i])*f; });
+}
+function applyManualMarks(){
+  const on=marksOverridden();
+  for(const b of S.race.boats){
+    if(on){ const lg=legsFromMarks(b); b._mlegs=lg; b._mcourse=lg?courseFromLegs(b,lg):null; }
+    else { b._mlegs=null; b._mcourse=null; }
+  }
+  S.usingManualMarks=on;
+}
+function boatLegs(b){ return b._mlegs||b.legs; }
+function boatCourse(b){ return b._mcourse||b.course; }
+function afterMarksChanged(){ applyManualMarks(); renderBG(); render(); if(S.race) setTab(S.tab); }
 
 // ---------- background layer (static tracks/marks) ----------
 function renderBG(){
@@ -264,7 +318,7 @@ function setTab(name){
 }
 function focusB(){ return S.byS[S.focus]; }
 function partnerB(){ return S.partner?S.byS[S.partner]:null; }
-function legSpans(b){ return b.legs.map(([a,c,k])=>({a:b.t[a],b:b.t[c],kind:k})); }
+function legSpans(b){ return boatLegs(b).map(([a,c,k])=>({a:b.t[a],b:b.t[c],kind:k})); }
 
 function fleetMedians(){
   const keys=['sog_mean','sog_up','sog_dn','twa_up','twa_dn','vmg_up','vmg_dn','n_tacks','n_gybes','tack_loss','gybe_loss','dist_nm'];
@@ -336,7 +390,7 @@ function tabSpeed(body){
   // per-leg breakdown
   body.insertAdjacentHTML('beforeend','<div class="sectitle">Per-leg average speed</div>');
   let t='<table><tr><th>Leg</th><th>Type</th><th>Avg SOG</th><th>Avg VMG</th></tr>';
-  f.legs.forEach(([a,c,k],i)=>{ let ss=0,vv=0,n=0; for(let j=a;j<=c;j++){ss+=f.sog[j];vv+=f.vmg[j];n++;}
+  boatLegs(f).forEach(([a,c,k],i)=>{ let ss=0,vv=0,n=0; for(let j=a;j<=c;j++){ss+=f.sog[j];vv+=f.vmg[j];n++;}
     t+=`<tr><td>${i+1}</td><td>${k}</td><td>${(ss/n).toFixed(2)} kt</td><td>${(Math.abs(vv/n)).toFixed(2)} kt</td></tr>`; });
   t+='</table>'; body.insertAdjacentHTML('beforeend',t);
 }
@@ -474,9 +528,10 @@ function tabStart(body){
 function tabPosition(body){
   const f=focusB(), p=partnerB(), r=S.race, fs=r.fleet_stats, G=fs.t;
   body.insertAdjacentHTML('beforeend','<div class="sectitle">Fleet position over time (1 = leading)</div>');
-  // rank each grid index by course progress
-  const rankOf=(boat)=>{ const out=[]; for(let k=0;k<G.length;k++){ const my=boat.course[k]; if(my==null){out.push([G[k],null]);continue;}
-      let rank=1; for(const o of r.boats){ const v=o.course[k]; if(v!=null && v>my) rank++; } out.push([G[k],rank]); } return out; };
+  // rank each grid index by course progress (uses mark-derived legs if edited)
+  const C={}; for(const o of r.boats) C[o.sail]=boatCourse(o);
+  const rankOf=(boat)=>{ const bc=C[boat.sail], out=[]; for(let k=0;k<G.length;k++){ const my=bc[k]; if(my==null){out.push([G[k],null]);continue;}
+      let rank=1; for(const o of r.boats){ const v=C[o.sail][k]; if(v!=null && v>my) rank++; } out.push([G[k],rank]); } return out; };
   const series=[{color:'#f5a623',w:2,data:rankOf(f)}];
   if(p) series.push({color:'#26d07c',w:1.7,data:rankOf(p)});
   S.charts.push(makeChart(body,{h:220,xmin:S.tMin,xmax:S.tMax,ymin:r.boats.length+1,ymax:0,
@@ -523,6 +578,7 @@ async function loadRace(i){
   $('#tEnd').textContent=fmtT(S.tMax-S.tMin);
   setWind(S.race.wind_from);
   $('#resetMarksBtn').style.display = marksOverridden() ? '' : 'none';
+  applyManualMarks();                  // derive legs from saved marks if any
   computeView(); renderBG(); render();
   drawLegend(); setTab(S.tab); syncTime();
 }
@@ -559,9 +615,9 @@ map.onmousedown=e=>{ if(!S.editMarks) return; const px=e.offsetX*DPR, py=e.offse
   renderBG(); render(); };
 map.onmousemove=e=>{ if(_dragMark==null) return; const px=e.offsetX*DPR, py=e.offsetY*DPR;
   effMarks()[_dragMark].ll=unproj(px,py); renderBG(); render(); };
-addEventListener('mouseup',()=>{ if(_dragMark!=null){ _dragMark=null; saveMarks(); } });
+addEventListener('mouseup',()=>{ if(_dragMark!=null){ _dragMark=null; saveMarks(); afterMarksChanged(); } });
 map.ondblclick=e=>{ if(!S.editMarks) return; const px=e.offsetX*DPR, py=e.offsetY*DPR;
-  const n=nearestMark(px,py); if(n.i>=0 && n.d<18*DPR){ effMarks().splice(n.i,1); saveMarks(); renderBG(); render(); } };
+  const n=nearestMark(px,py); if(n.i>=0 && n.d<18*DPR){ effMarks().splice(n.i,1); saveMarks(); afterMarksChanged(); } };
 addEventListener('resize',()=>{ if(S.race){ layout(); renderBG(); render(); S.charts.forEach(c=>c.draw()); } });
 addEventListener('keydown',e=>{ if(e.code==='Space'){e.preventDefault();setPlaying(!S.playing);}
   if(e.code==='ArrowRight'){S.t=Math.min(S.tMax,S.t+5);syncTime();} if(e.code==='ArrowLeft'){S.t=Math.max(S.tMin,S.t-5);syncTime();} });

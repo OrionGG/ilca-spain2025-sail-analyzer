@@ -456,67 +456,94 @@ def _med_xy(pts):
     return [float(np.median(P[:, 0])), float(np.median(P[:, 1]))]
 
 
+def _upwind_legs(legs):   return [i for i, (a, c, k) in enumerate(legs) if k == "upwind"]
+def _downwind_legs(legs): return [i for i, (a, c, k) in enumerate(legs) if k == "downwind"]
+
+
+def detect_windward_mark(boats, legs_by_sail, ux, uy):
+    """Mark 1 = each boat's furthest-upwind point on the FIRST beat; fleet median."""
+    pts = []
+    for b in boats:
+        legs = legs_by_sail.get(b.sail) or []
+        up = _upwind_legs(legs)
+        if up and b.x is not None:
+            a, c, _ = legs[up[0]]; p = b.x * ux + b.y * uy
+            j = a + int(np.argmax(p[a:c + 1])); pts.append((b.lat[j], b.lon[j]))
+    return _med_xy(pts)
+
+
+def detect_wing_mark(boats, legs_by_sail, ux, uy):
+    """Mark 2 (wing) = each boat's furthest-upwind point on the SECOND beat."""
+    pts = []
+    for b in boats:
+        legs = legs_by_sail.get(b.sail) or []
+        up = _upwind_legs(legs)
+        if len(up) >= 2 and b.x is not None:
+            a, c, _ = legs[up[1]]; p = b.x * ux + b.y * uy
+            j = a + int(np.argmax(p[a:c + 1])); pts.append((b.lat[j], b.lon[j]))
+    return _med_xy(pts)
+
+
+def detect_gate(boats, legs_by_sail, ux, uy, lx, ly):
+    """Leeward gate = furthest-downwind point of each run; split into two buoys
+    when the cross-wind rounding positions are clearly bimodal. Returns 1-2 lls."""
+    pts = []
+    for b in boats:
+        legs = legs_by_sail.get(b.sail) or []
+        if b.x is None:
+            continue
+        p = b.x * ux + b.y * uy
+        for di in _downwind_legs(legs):
+            a, c, _ = legs[di]; j = a + int(np.argmin(p[a:c + 1]))
+            pts.append((b.lat[j], b.lon[j], float(b.x[j] * lx + b.y[j] * ly)))
+    if len(pts) < 6:
+        gm = _med_xy([(la, lo) for la, lo, _ in pts])
+        return [gm] if gm else []
+    cw = np.sort(np.array([g[2] for g in pts]))
+    gaps = np.diff(cw)
+    if len(gaps) and gaps.max() > 80:                 # two distinct buoys
+        split = cw[int(np.argmax(gaps))] + gaps.max() / 2
+        out = []
+        for grp in ([(la, lo) for la, lo, c in pts if c < split],
+                    [(la, lo) for la, lo, c in pts if c >= split]):
+            gm = _med_xy(grp)
+            if gm:
+                out.append(gm)
+        return out
+    gm = _med_xy([(la, lo) for la, lo, _ in pts])
+    return [gm] if gm else []
+
+
+def detect_finish(boats, legs_by_sail):
+    """Finish ~ end of the last detected leg, fleet median."""
+    pts = []
+    for b in boats:
+        legs = legs_by_sail.get(b.sail) or []
+        if legs:
+            pts.append((b.lat[legs[-1][1]], b.lon[legs[-1][1]]))
+    return _med_xy(pts)
+
+
 def detect_marks(boats, wind_from, legs_by_sail):
     """
-    Locate the course marks at the fleet's actual rounding points (not the
-    smoothed leg boundaries). For each boat: the windward mark is its furthest-
-    upwind point on the first beat, the gate its furthest-downwind point on each
-    run, the wing mark the sharp turn ending a reach (or the 2nd beat). Robust
-    median across the fleet. A leeward GATE is reported as two buoys when the
-    rounding positions are clearly split across the course.
-    Returns a list of {"label","ll":[lat,lon]}.
+    Locate the course marks at the fleet's actual rounding points by calling a
+    dedicated detector per mark. Returns a list of {"label","ll":[lat,lon]}.
     """
     wf = math.radians(wind_from)
     ux, uy = math.sin(wf), math.cos(wf)
     lx, ly = uy, -ux                                  # cross-wind (along line)
-    m1, wing, gate, fin = [], [], [], []
-    for b in boats:
-        legs = legs_by_sail.get(b.sail) or []
-        if not legs or b.x is None:
-            continue
-        p = b.x * ux + b.y * uy
-        up_idx = [i for i, (a, c, k) in enumerate(legs) if k == "upwind"]
-        dn_idx = [i for i, (a, c, k) in enumerate(legs) if k == "downwind"]
-        # windward mark = furthest-upwind point of the FIRST beat
-        if up_idx:
-            a, c, _ = legs[up_idx[0]]; j = a + int(np.argmax(p[a:c + 1]))
-            m1.append((b.lat[j], b.lon[j]))
-        # wing mark = furthest-upwind point of the SECOND beat
-        if len(up_idx) >= 2:
-            a, c, _ = legs[up_idx[1]]; j = a + int(np.argmax(p[a:c + 1]))
-            wing.append((b.lat[j], b.lon[j]))
-        # gate = furthest-downwind point of each run
-        for di in dn_idx:
-            a, c, _ = legs[di]; j = a + int(np.argmin(p[a:c + 1]))
-            gate.append((b.lat[j], b.lon[j], float(b.x[j] * lx + b.y[j] * ly)))
-        fin.append((b.lat[legs[-1][1]], b.lon[legs[-1][1]]))
-
     marks = []
-    mm = _med_xy(m1)
-    if mm:
-        marks.append({"label": "1", "ll": mm})
-    wm = _med_xy([(la, lo) for la, lo in wing])
-    if wm:
-        marks.append({"label": "2", "ll": wm})
-    # gate: split into two buoys if rounding cross-positions are clearly bimodal
-    if len(gate) >= 6:
-        cw = np.sort(np.array([g[2] for g in gate]))
-        gaps = np.diff(cw)
-        if len(gaps) and gaps.max() > 80:
-            split = cw[int(np.argmax(gaps))] + gaps.max() / 2
-            left = [(la, lo) for la, lo, c in gate if c < split]
-            right = [(la, lo) for la, lo, c in gate if c >= split]
-            for grp in (left, right):
-                gm = _med_xy(grp)
-                if gm:
-                    marks.append({"label": "G", "ll": gm})
-        else:
-            gm = _med_xy([(la, lo) for la, lo, c in gate])
-            if gm:
-                marks.append({"label": "G", "ll": gm})
-    fm = _med_xy(fin)
-    if fm:
-        marks.append({"label": "F", "ll": fm})
+    m1 = detect_windward_mark(boats, legs_by_sail, ux, uy)
+    if m1:
+        marks.append({"label": "1", "ll": m1})
+    m2 = detect_wing_mark(boats, legs_by_sail, ux, uy)
+    if m2:
+        marks.append({"label": "2", "ll": m2})
+    for g in detect_gate(boats, legs_by_sail, ux, uy, lx, ly):
+        marks.append({"label": "G", "ll": g})
+    fin = detect_finish(boats, legs_by_sail)
+    if fin:
+        marks.append({"label": "F", "ll": fin})
     return marks
 
 
