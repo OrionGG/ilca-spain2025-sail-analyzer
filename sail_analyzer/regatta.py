@@ -226,7 +226,7 @@ def _nogo_center(cog, coarse, search=48, halfwidth=33, minpts=40):
     return float(best[1]) if best else None
 
 
-def wind_timeseries(boats, wind0, grid, win=150.0):
+def wind_timeseries(boats, wind0, grid, win=240.0):
     """
     Time-varying wind direction (shift track) on a common time grid.
 
@@ -247,11 +247,11 @@ def wind_timeseries(boats, wind0, grid, win=150.0):
     allt = np.concatenate(allt); alla = np.concatenate(alla)
     for i, tc in enumerate(grid):
         m = np.abs(allt - tc) <= win / 2
-        # track shifts: search a tight window around the running wind estimate
-        c = _nogo_center(alla[m], wind0, search=30, halfwidth=30, minpts=30)
+        # track shifts: tight search around the mean so it shows real shifts, not noise
+        c = _nogo_center(alla[m], wind0, search=20, halfwidth=30, minpts=60)
         if c is not None:
             out[i] = c
-    return _circ_smooth(out, 5)
+    return _circ_smooth(out, 9)
 
 
 def apply_wind(b: Boat, wind_from):

@@ -170,6 +170,20 @@ function applyManualMarks(){
 }
 function boatLegs(b){ return b._mlegs||b.legs; }
 function boatCourse(b){ return b._mcourse||b.course; }
+
+// ---------- ideal (perfect) route = rhumb lines through the marks ----------
+function courseWaypoints(){               // [ [lat,lon], ... ] start-mid -> marks in rounding order
+  const m1=markBy('1')[0], m2=markBy('2')[0], G=markBy('G'), rc=markBy('RC')[0], pin=markBy('Pin')[0], fin=markBy('F')[0];
+  const gate = G.length ? [G.reduce((s,x)=>s+x[0],0)/G.length, G.reduce((s,x)=>s+x[1],0)/G.length] : null;
+  const perLeg=[m1,m2,gate,m2,gate,fin];          // mark at the END of each leg
+  const wps=[];
+  if(rc&&pin) wps.push([(rc[0]+pin[0])/2,(rc[1]+pin[1])/2]);
+  boatLegs(focusB()).forEach((lg,i)=>{ if(perLeg[i]) wps.push(perLeg[i]); });
+  return wps;
+}
+function rhumbLen(wps){ let d=0; for(let i=1;i<wps.length;i++) d+=distM(wps[i-1][0],wps[i-1][1],wps[i][0],wps[i][1]); return d; }
+function sailedDist(b){ const lg=boatLegs(b); if(!lg.length) return 0; const a=lg[0][0],c=lg[lg.length-1][1];
+  let s=0; for(let j=a+1;j<=c;j++) s+=distM(b.lat[j-1],b.lon[j-1],b.lat[j],b.lon[j]); return s; }
 function afterMarksChanged(){ applyManualMarks(); renderBG(); render(); if(S.race) setTab(S.tab); }
 
 // ---------- background layer (static tracks/marks) ----------
@@ -187,6 +201,10 @@ function renderBG(){
     bgx.strokeStyle='rgba(245,166,35,.75)'; bgx.lineWidth=2*DPR;
     bgx.setLineDash([6*DPR,5*DPR]); bgx.beginPath();
     bgx.moveTo(p1[0],p1[1]); bgx.lineTo(p2[0],p2[1]); bgx.stroke(); bgx.setLineDash([]); }
+  // ideal route (rhumb through the marks)
+  if(S.showIdeal){ const wps=courseWaypoints();
+    if(wps.length>1){ bgx.strokeStyle='rgba(90,210,255,.85)'; bgx.lineWidth=2*DPR; bgx.setLineDash([2*DPR,4*DPR]);
+      bgx.beginPath(); wps.forEach((p,i)=>{ const [x,y]=proj(p[0],p[1]); i?bgx.lineTo(x,y):bgx.moveTo(x,y); }); bgx.stroke(); bgx.setLineDash([]); } }
   // course marks (1 = windward, 2 = wing/reach, G = gate, F = finish, RC/Pin = start)
   for(const m of effMarks()) drawMark(m.ll, m.label);
   // partner full track
@@ -644,7 +662,27 @@ function tabPosition(body){
   if(rk.length){ body.insertAdjacentHTML('beforeend',`<div class="sectitle">Summary</div>
     <div class="muted">First clear position: <b>${rk[0][1]}</b> · Best: <b class="good">${Math.min(...rk.map(x=>x[1]))}</b>
     · Worst: <b class="bad">${Math.max(...rk.map(x=>x[1]))}</b> · Final: <b>${rk[rk.length-1][1]}</b> of ${r.boats.length}.</div>`); }
+
+  // closest to the ideal (perfect) route = least extra distance vs the rhumb through the marks
+  const wps=courseWaypoints(), rl=rhumbLen(wps), nl=boatLegs(f).length;
+  if(wps.length>1 && rl>0){
+    const eff=r.boats.map(b=>({sail:b.sail,name:b.name,s:sailedDist(b),n:boatLegs(b).length}))
+      .filter(x=>x.n>=nl && x.s>0).map(x=>({...x,e:rl/x.s}));
+    eff.sort((a,b)=>b.e-a.e);
+    body.insertAdjacentHTML('beforeend','<div class="sectitle">Closest to the ideal route (toggle “Ideal route” on the map)</div>');
+    const myI=eff.findIndex(x=>x.sail===S.focus);
+    let h='<table><tr><th>#</th><th>Boat</th><th>Efficiency</th><th>Extra dist</th></tr>';
+    eff.slice(0,5).forEach((x,i)=>{ h+=row_eff(i+1,x,rl); });
+    if(myI>=5) h+=`<tr><td colspan=4 style="text-align:center;color:var(--mut)">…</td></tr>`+row_eff(myI+1,eff[myI],rl);
+    h+='</table>'; body.insertAdjacentHTML('beforeend',h);
+    body.insertAdjacentHTML('beforeend',`<div class="muted">Ideal = straight rhumb through the marks
+     (${(rl/1852).toFixed(2)} NM). Upwind everyone must tack, so efficiency is &lt;100% for all — higher = sailed less extra
+     distance = closest to the perfect route. Only boats that completed the course are ranked.</div>`);
+  }
 }
+function row_eff(rank,x,rl){ const extra=x.s-rl; const me=x.sail===S.focus;
+  return `<tr${me?' style="background:var(--panel2)"':''}><td>${rank}</td><td>${me?'<b>'+x.name+'</b>':x.name}</td>`+
+    `<td><b class="${x.e>=0.72?'good':x.e<0.6?'bad':''}">${(x.e*100).toFixed(0)}%</b></td><td>+${(extra/1852).toFixed(2)} NM</td></tr>`; }
 
 // ---------- wind arrow ----------
 function setWind(deg){ $('#windVal').textContent=deg.toFixed(0)+'°';
@@ -700,6 +738,7 @@ $('#playBtn').onclick=()=>setPlaying(!S.playing);
 $('#timeRange').oninput=e=>{ S.t=S.tMin+(e.target.value/1000)*(S.tMax-S.tMin); if(S.playing)setPlaying(false); syncTime(); };
 $('#fitBtn').onclick=()=>{ computeView(); renderBG(); render(); };
 $('#fleetBtn').onclick=e=>{ S.showFleet=!S.showFleet; e.target.classList.toggle('on',S.showFleet); render(); };
+$('#idealBtn').onclick=e=>{ S.showIdeal=!S.showIdeal; e.target.classList.toggle('on',S.showIdeal); renderBG(); render(); };
 document.querySelectorAll('#maptools [data-mode]').forEach(btn=>btn.onclick=()=>{
   S.colorMode=btn.dataset.mode; document.querySelectorAll('#maptools [data-mode]').forEach(b=>b.classList.toggle('on',b===btn));
   renderBG(); render(); drawLegend(); });
