@@ -303,15 +303,16 @@ function updateHover(){
     if(S.partner&&S.byS[S.partner]){
       const ps=sampleAt(S.byS[S.partner],S.t);
       if(ps.inrace){
-        const dlt=(v,u,dp=2,good=null)=>{ const sign=v>=0?'+':''; const cls=good==null?'':(good?'good':'bad');
-          return `<b class="${cls}">${sign}${v.toFixed(dp)}</b>${u}`; };
+        // row: real partner value + delta vs focus
+        const row=(lbl,val,d,u,dp=2,good=null)=>{ const sign=d>=0?'+':''; const cls=good==null?'':(good?'good':'bad');
+          return `${lbl} ${val.toFixed(dp)}${u} <b class="${cls}">(${sign}${d.toFixed(dp)})</b><br>`; };
         const dCog=((s.cog-ps.cog+540)%360)-180;          // signed heading diff
         html+=`<hr style="border-color:#2b333f;margin:5px 0">`+
           `<span style="color:#3aa0ff">${S.byS[S.partner].name}</span><br>`+
-          `ΔSOG ${dlt(s.sog-ps.sog,' kt',2,s.sog-ps.sog>=0)}<br>`+
-          `ΔTWA ${dlt(s.twa-ps.twa,'°',0)}<br>`+
-          `ΔVMG ${dlt(s.vmg-ps.vmg,' kt',2)}<br>`+
-          `ΔCOG ${dlt(dCog,'°',0)}`;
+          row('SOG',ps.sog,s.sog-ps.sog,' kt',2,s.sog-ps.sog>=0)+
+          row('TWA',ps.twa,s.twa-ps.twa,'°',0)+
+          row('VMG',ps.vmg,s.vmg-ps.vmg,' kt',2)+
+          `COG ${ps.cog.toFixed(0)}° <b>(${dCog>=0?'+':''}${dCog.toFixed(0)})</b>`;
       }
     }
   } else html+='<span class="muted">not on course</span>';
@@ -500,7 +501,9 @@ function liftedPct(boat){          // % of upwind time on the lifted tack (vs ra
   for(const lg of upwindLegsToScan(boat)){ const a=lg[0],c=lg[1];
     for(let j=a;j<c;j++){ const w=winAt(boat.t[j]); if(w==null)continue;
       const shift=((w-avg+540)%360)-180;
-      const lifted = boat.tack[j]>0 ? shift<0 : shift>0;
+      // tack>0 = heading right of wind; a right shift (veer, shift>0) points it
+      // closer to the mark = lifted. (left/back shift lifts the other tack.)
+      const lifted = boat.tack[j]>0 ? shift>0 : shift<0;
       const dt=boat.t[j+1]-boat.t[j]; lifted?lift+=dt:head+=dt; } }
   const tot=lift+head; return tot? lift/tot*100 : null;
 }
