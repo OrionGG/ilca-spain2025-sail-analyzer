@@ -129,20 +129,27 @@ def build_race(race_dir: str, race_name: str):
     for i, b in enumerate(sorted(boats, key=lambda x: x.sail)):
         mans = R.detect_maneuvers(b, wind_from)
         legs = legs_by_sail[b.sail]
-        up = b.twa < 70; dn = b.twa > 110
-        dist_m = float(np.sum(np.hypot(np.diff(b.x), np.diff(b.y))))
+        # RACE window only: gun -> finish (exclude pre-start and post-finish)
+        gi = int(np.argmin(np.abs(b.t - gun_t)))
+        fi = legs[-1][1] if legs else len(b.t) - 1
+        sl = slice(gi, fi + 1)
+        sog_s, twa_s, vmg_s = b.sog[sl], b.twa[sl], b.vmg[sl]
+        up = twa_s < 70; dn = twa_s > 110
+        dist_m = float(np.sum(np.hypot(np.diff(b.x[sl]), np.diff(b.y[sl]))))
+        mans = [m for m in mans if b.t[gi] <= m.t <= b.t[fi]]   # race maneuvers only
         tacks = [m for m in mans if m.kind == "tack"]
         gybes = [m for m in mans if m.kind == "gybe"]
         summary = {
-            "n": len(b.t),
+            "n": int(fi - gi + 1),
+            "race_min": round(float(b.t[fi] - b.t[gi]) / 60.0, 1),
             "dist_nm": round(dist_m / 1852.0, 2),
-            "sog_mean": round(float(b.sog.mean()), 2),
-            "sog_up": round(float(b.sog[up].mean()), 2) if up.any() else None,
-            "sog_dn": round(float(b.sog[dn].mean()), 2) if dn.any() else None,
-            "twa_up": round(float(np.median(b.twa[up])), 0) if up.any() else None,
-            "twa_dn": round(float(np.median(b.twa[dn])), 0) if dn.any() else None,
-            "vmg_up": round(float(b.vmg[up].mean()), 2) if up.any() else None,
-            "vmg_dn": round(float(-b.vmg[dn].mean()), 2) if dn.any() else None,
+            "sog_mean": round(float(sog_s.mean()), 2),
+            "sog_up": round(float(sog_s[up].mean()), 2) if up.any() else None,
+            "sog_dn": round(float(sog_s[dn].mean()), 2) if dn.any() else None,
+            "twa_up": round(float(np.median(twa_s[up])), 0) if up.any() else None,
+            "twa_dn": round(float(np.median(twa_s[dn])), 0) if dn.any() else None,
+            "vmg_up": round(float(vmg_s[up].mean()), 2) if up.any() else None,
+            "vmg_dn": round(float(-vmg_s[dn].mean()), 2) if dn.any() else None,
             "n_tacks": len(tacks), "n_gybes": len(gybes),
             "tack_loss": round(float(np.mean([m.bl_lost for m in tacks])), 2) if tacks else None,
             "gybe_loss": round(float(np.mean([m.bl_lost for m in gybes])), 2) if gybes else None,

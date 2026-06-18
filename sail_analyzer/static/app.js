@@ -171,17 +171,22 @@ function applyManualMarks(){
 function boatLegs(b){ return b._mlegs||b.legs; }
 function boatCourse(b){ return b._mcourse||b.course; }
 
-// ---------- ideal (perfect) route = rhumb lines through the marks ----------
-function courseWaypoints(){               // [ [lat,lon], ... ] start-mid -> marks in rounding order
-  const m1=markBy('1')[0], m2=markBy('2')[0], G=markBy('G'), rc=markBy('RC')[0], pin=markBy('Pin')[0], fin=markBy('F')[0];
-  const gate = G.length ? [G.reduce((s,x)=>s+x[0],0)/G.length, G.reduce((s,x)=>s+x[1],0)/G.length] : null;
-  const perLeg=[m1,m2,gate,m2,gate,fin];          // mark at the END of each leg
-  const wps=[];
-  if(rc&&pin) wps.push([(rc[0]+pin[0])/2,(rc[1]+pin[1])/2]);
-  boatLegs(focusB()).forEach((lg,i)=>{ if(perLeg[i]) wps.push(perLeg[i]); });
-  return wps;
+// ---------- ideal route = REALISTIC: fastest actually-sailed track per leg ----------
+// Per leg index, pick the boat that did that leg in least time; stitch its real
+// track. So the ideal = best demonstrated path+speed each leg, not a straight line.
+function legBest(){
+  const nl=boatLegs(focusB()).length, best=[];
+  for(let i=0;i<nl;i++){ let bt=Infinity,bb=null;
+    for(const o of S.race.boats){ const lg=boatLegs(o); if(i>=lg.length) continue;
+      const [a,c]=lg[i], tm=o.t[c]-o.t[a]; if(tm>0 && tm<bt){ bt=tm; bb={sail:o.sail,a,c,t:tm}; } }
+    best.push(bb); }
+  return best;
 }
-function rhumbLen(wps){ let d=0; for(let i=1;i<wps.length;i++) d+=distM(wps[i-1][0],wps[i-1][1],wps[i][0],wps[i][1]); return d; }
+function idealRoute(){ const wps=[];
+  for(const bb of legBest()){ if(!bb) continue; const o=S.byS[bb.sail];
+    for(let j=bb.a;j<=bb.c;j+=2) wps.push([o.lat[j],o.lon[j]]); } return wps; }
+function idealTime(){ return legBest().reduce((s,bb)=>s+(bb?bb.t:0),0); }      // sum of fastest leg times
+function raceTime(b){ const lg=boatLegs(b); return lg.length? b.t[lg[lg.length-1][1]]-b.t[lg[0][0]] : 0; }
 function sailedDist(b){ const lg=boatLegs(b); if(!lg.length) return 0; const a=lg[0][0],c=lg[lg.length-1][1];
   let s=0; for(let j=a+1;j<=c;j++) s+=distM(b.lat[j-1],b.lon[j-1],b.lat[j],b.lon[j]); return s; }
 function afterMarksChanged(){ applyManualMarks(); renderBG(); render(); if(S.race) setTab(S.tab); }
@@ -201,9 +206,9 @@ function renderBG(){
     bgx.strokeStyle='rgba(245,166,35,.75)'; bgx.lineWidth=2*DPR;
     bgx.setLineDash([6*DPR,5*DPR]); bgx.beginPath();
     bgx.moveTo(p1[0],p1[1]); bgx.lineTo(p2[0],p2[1]); bgx.stroke(); bgx.setLineDash([]); }
-  // ideal route (rhumb through the marks)
-  if(S.showIdeal){ const wps=courseWaypoints();
-    if(wps.length>1){ bgx.strokeStyle='rgba(90,210,255,.85)'; bgx.lineWidth=2*DPR; bgx.setLineDash([2*DPR,4*DPR]);
+  // ideal route = fastest demonstrated track per leg (real paths, stitched)
+  if(S.showIdeal){ const wps=idealRoute();
+    if(wps.length>1){ bgx.strokeStyle='rgba(90,210,255,.9)'; bgx.lineWidth=2.4*DPR; bgx.setLineDash([3*DPR,4*DPR]);
       bgx.beginPath(); wps.forEach((p,i)=>{ const [x,y]=proj(p[0],p[1]); i?bgx.lineTo(x,y):bgx.moveTo(x,y); }); bgx.stroke(); bgx.setLineDash([]); } }
   // course marks (1 = windward, 2 = wing/reach, G = gate, F = finish, RC/Pin = start)
   for(const m of effMarks()) drawMark(m.ll, m.label);
@@ -425,29 +430,35 @@ function fleetMedians(){
   return o;
 }
 
-function card(parent,k,v,unit,delta,deltaGood){
-  const d=document.createElement('div'); d.className='card';
+// dir: +1 higher=better, -1 lower=better, 0 neutral (no colour). pname = partner label.
+function card(parent,k,v,unit,fleetV,partnerV,dir,pname){
+  dir = dir==null?0:dir;
+  const line=(d,who)=>{ if(d==null||!isFinite(d)) return '';
+    const cls = dir===0?'':((dir>0?d>=0:d<=0)?'pos':'neg');
+    return `<div class="d ${cls}">${d>=0?'▲':'▼'} ${Math.abs(d).toFixed(2)} vs ${who}</div>`; };
   let dh='';
-  if(delta!=null && isFinite(delta)){ const good=deltaGood?deltaGood(delta):delta>=0;
-    dh=`<div class="d ${good?'pos':'neg'}">${delta>=0?'▲':'▼'} ${Math.abs(delta).toFixed(2)} vs fleet</div>`; }
+  if(v!=null&&fleetV!=null) dh+=line(v-fleetV,'fleet');
+  if(v!=null&&partnerV!=null) dh+=line(v-partnerV,pname);
+  const d=document.createElement('div'); d.className='card';
   d.innerHTML=`<div class="k">${k}</div><div class="v">${v==null?'–':v}${unit?`<span style="font-size:13px;color:var(--mut)"> ${unit}</span>`:''}</div>${dh}`;
   parent.appendChild(d);
 }
 
 function tabOverview(body){
   const f=focusB(), p=partnerB(), s=f.summary, fm=fleetMedians();
+  const ps=p?p.summary:null, pn=p?p.name.slice(0,9):null, pv=k=>ps?ps[k]:null;
   const grid=document.createElement('div'); grid.className='cards'; body.appendChild(grid);
-  card(grid,'Avg speed',s.sog_mean,'kt',s.sog_mean-fm.sog_mean);
-  card(grid,'Upwind speed',s.sog_up,'kt',s.sog_up-fm.sog_up);
-  card(grid,'Downwind speed',s.sog_dn,'kt',s.sog_dn-fm.sog_dn);
-  card(grid,'Upwind VMG',s.vmg_up,'kt',s.vmg_up-fm.vmg_up);
-  card(grid,'Downwind VMG',s.vmg_dn,'kt',s.vmg_dn-fm.vmg_dn);
-  card(grid,'Upwind angle',s.twa_up,'°',s.twa_up-fm.twa_up,d=>d<0); // lower TWA = points higher = good
-  card(grid,'Tacks',s.n_tacks,'',null);
-  card(grid,'Avg tack loss',s.tack_loss,'BL',s.tack_loss-fm.tack_loss,d=>d<0);
-  card(grid,'Gybes',s.n_gybes,'',null);
-  card(grid,'Avg gybe loss',s.gybe_loss,'BL',s.gybe_loss-fm.gybe_loss,d=>d<0);
-  card(grid,'Distance',s.dist_nm,'NM',null);
+  card(grid,'Avg speed',s.sog_mean,'kt',fm.sog_mean,pv('sog_mean'),1,pn);
+  card(grid,'Upwind speed',s.sog_up,'kt',fm.sog_up,pv('sog_up'),1,pn);
+  card(grid,'Downwind speed',s.sog_dn,'kt',fm.sog_dn,pv('sog_dn'),1,pn);
+  card(grid,'Upwind VMG',s.vmg_up,'kt',fm.vmg_up,pv('vmg_up'),1,pn);
+  card(grid,'Downwind VMG',s.vmg_dn,'kt',fm.vmg_dn,pv('vmg_dn'),1,pn);
+  card(grid,'Upwind angle',s.twa_up,'°',fm.twa_up,pv('twa_up'),-1,pn); // lower TWA = points higher = good
+  card(grid,'Tacks',s.n_tacks,'',fm.n_tacks,pv('n_tacks'),0,pn);
+  card(grid,'Avg tack loss',s.tack_loss,'BL',fm.tack_loss,pv('tack_loss'),-1,pn);
+  card(grid,'Gybes',s.n_gybes,'',fm.n_gybes,pv('n_gybes'),0,pn);
+  card(grid,'Avg gybe loss',s.gybe_loss,'BL',fm.gybe_loss,pv('gybe_loss'),-1,pn);
+  card(grid,'Distance',s.dist_nm,'NM',fm.dist_nm,pv('dist_nm'),-1,pn);
 
   body.insertAdjacentHTML('beforeend',`<div class="sectitle">How to read this</div>
    <div class="muted">Deltas compare <b style="color:var(--focus)">${f.name}</b> to the <b>fleet median</b> for this race.
@@ -460,12 +471,17 @@ function tabOverview(body){
     body.insertAdjacentHTML('beforeend',`<div class="sectitle">Head-to-head vs ${p.name}</div>`);
     const rows=[['Upwind speed','sog_up','kt',1],['Downwind speed','sog_dn','kt',1],
       ['Upwind VMG','vmg_up','kt',1],['Downwind VMG','vmg_dn','kt',1],
-      ['Upwind angle','twa_up','°',-1],['Avg tack loss','tack_loss','BL',-1]];
-    let t='<table><tr><th>Metric</th><th style="color:var(--focus)">'+f.name.slice(0,10)+'</th><th style="color:var(--partner)">'+p.name.slice(0,10)+'</th><th>Δ</th></tr>';
-    for(const [lbl,key,u,dir] of rows){ const a=s[key],b=ps[key]; const d=(a!=null&&b!=null)?a-b:null;
+      ['Upwind angle','twa_up','°',-1],['Avg tack loss','tack_loss','BL',-1],
+      ['Distance sailed','dist_nm','NM',-1]];   // less distance = better
+    let t='<table><tr><th>Metric</th><th style="color:var(--focus)">'+f.name.slice(0,9)+'</th>'+
+      '<th style="color:var(--partner)">'+p.name.slice(0,9)+'</th><th>Fleet avg</th><th>Δ</th></tr>';
+    for(const [lbl,key,u,dir] of rows){ const a=s[key],b=ps[key],fl=fm[key]; const d=(a!=null&&b!=null)?a-b:null;
       const good=d!=null && (dir>0?d>=0:d<=0);
-      t+=`<tr><td>${lbl}</td><td>${a??'–'} ${u}</td><td>${b??'–'} ${u}</td><td><b class="${good?'good':'bad'}">${d==null?'–':(d>=0?'+':'')+d.toFixed(2)}</b></td></tr>`; }
+      t+=`<tr><td>${lbl}</td><td>${a??'–'} ${u}</td><td>${b??'–'} ${u}</td><td>${fl!=null?fl.toFixed(2):'–'} ${u}</td>`+
+         `<td><b class="${good?'good':'bad'}">${d==null?'–':(d>=0?'+':'')+d.toFixed(2)}</b></td></tr>`; }
     t+='</table>'; body.insertAdjacentHTML('beforeend',t);
+    body.insertAdjacentHTML('beforeend',`<div class="muted">Δ = ${f.name.slice(0,9)} − ${p.name.slice(0,9)} (green = ${f.name.slice(0,9)} better).
+     Distance sailed: less = more efficient. Near-equal speed but less distance can win the race.</div>`);
   }
 }
 
@@ -669,26 +685,26 @@ function tabPosition(body){
     <div class="muted">First clear position: <b>${rk[0][1]}</b> · Best: <b class="good">${Math.min(...rk.map(x=>x[1]))}</b>
     · Worst: <b class="bad">${Math.max(...rk.map(x=>x[1]))}</b> · Final: <b>${rk[rk.length-1][1]}</b> of ${r.boats.length}.</div>`); }
 
-  // closest to the ideal (perfect) route = least extra distance vs the rhumb through the marks
-  const wps=courseWaypoints(), rl=rhumbLen(wps), nl=boatLegs(f).length;
-  if(wps.length>1 && rl>0){
-    const eff=r.boats.map(b=>({sail:b.sail,name:b.name,s:sailedDist(b),n:boatLegs(b).length}))
-      .filter(x=>x.n>=nl && x.s>0).map(x=>({...x,e:rl/x.s}));
+  // closest to the ideal route = least time vs the fastest-demonstrated-per-leg total
+  const it=idealTime(), nl=boatLegs(f).length;
+  if(it>0){
+    const eff=r.boats.map(b=>({sail:b.sail,name:b.name,rt:raceTime(b),n:boatLegs(b).length}))
+      .filter(x=>x.n>=nl && x.rt>0).map(x=>({...x,e:it/x.rt}));
     eff.sort((a,b)=>b.e-a.e);
     body.insertAdjacentHTML('beforeend','<div class="sectitle">Closest to the ideal route (toggle “Ideal route” on the map)</div>');
     const myI=eff.findIndex(x=>x.sail===S.focus);
-    let h='<table><tr><th>#</th><th>Boat</th><th>Efficiency</th><th>Extra dist</th></tr>';
-    eff.slice(0,5).forEach((x,i)=>{ h+=row_eff(i+1,x,rl); });
-    if(myI>=5) h+=`<tr><td colspan=4 style="text-align:center;color:var(--mut)">…</td></tr>`+row_eff(myI+1,eff[myI],rl);
+    let h='<table><tr><th>#</th><th>Boat</th><th>Match</th><th>Lost vs ideal</th></tr>';
+    eff.slice(0,5).forEach((x,i)=>{ h+=row_eff(i+1,x,it); });
+    if(myI>=5) h+=`<tr><td colspan=4 style="text-align:center;color:var(--mut)">…</td></tr>`+row_eff(myI+1,eff[myI],it);
     h+='</table>'; body.insertAdjacentHTML('beforeend',h);
-    body.insertAdjacentHTML('beforeend',`<div class="muted">Ideal = straight rhumb through the marks
-     (${(rl/1852).toFixed(2)} NM). Upwind everyone must tack, so efficiency is &lt;100% for all — higher = sailed less extra
-     distance = closest to the perfect route. Only boats that completed the course are ranked.</div>`);
+    body.insertAdjacentHTML('beforeend',`<div class="muted">Ideal = fastest <b>actually-sailed</b> track on each leg, stitched
+     (real fleet paths/speeds), total ${fmtT(it)}. Match = ideal_time / your_time; higher = closer to sailing every leg
+     like the fleet's best. No single boat hits 100% (nobody is fastest on every leg). Completed-course boats only.</div>`);
   }
 }
-function row_eff(rank,x,rl){ const extra=x.s-rl; const me=x.sail===S.focus;
+function row_eff(rank,x,it){ const lost=x.rt-it; const me=x.sail===S.focus;
   return `<tr${me?' style="background:var(--panel2)"':''}><td>${rank}</td><td>${me?'<b>'+x.name+'</b>':x.name}</td>`+
-    `<td><b class="${x.e>=0.72?'good':x.e<0.6?'bad':''}">${(x.e*100).toFixed(0)}%</b></td><td>+${(extra/1852).toFixed(2)} NM</td></tr>`; }
+    `<td><b class="${x.e>=0.95?'good':x.e<0.88?'bad':''}">${(x.e*100).toFixed(0)}%</b></td><td>+${fmtT(lost)}</td></tr>`; }
 
 // ---------- wind arrow ----------
 function setWind(deg){ $('#windVal').textContent=deg.toFixed(0)+'°';
