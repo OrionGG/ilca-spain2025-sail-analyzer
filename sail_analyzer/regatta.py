@@ -507,6 +507,29 @@ def detect_wing_mark(boats, legs_by_sail, ux, uy):
     return _med_xy(pts)
 
 
+def _refine_turn(b, idx, win=12):
+    """Index of the sharpest heading change near idx (the rounding/bear-away apex)."""
+    n = len(b.cog); lo, hi = max(0, idx - win), min(n - 1, idx + win)
+    best, bj = -1.0, idx
+    for k in range(lo, hi):
+        d = abs(((b.cog[min(k + 4, n - 1)] - b.cog[max(k - 4, 0)] + 180) % 360) - 180)
+        if d > best:
+            best, bj = d, k
+    return bj
+
+
+def _wing_rounding(boats, legs_by_sail, nth):
+    """Wing-mark rounding at the bear-away starting the nth (0/1) downwind run."""
+    pts = []
+    for b in boats:
+        legs = legs_by_sail.get(b.sail) or []
+        dn = _downwind_legs(legs)
+        if len(dn) > nth and b.x is not None:
+            j = _refine_turn(b, legs[dn[nth]][0])
+            pts.append((b.lat[j], b.lon[j]))
+    return _med_xy(pts)
+
+
 def detect_gate(boats, legs_by_sail, ux, uy, lx, ly):
     """Leeward gate = furthest-downwind point of each run; split into two buoys
     when the cross-wind rounding positions are clearly bimodal. Returns 1-2 lls."""
@@ -547,10 +570,12 @@ def detect_finish(boats, legs_by_sail):
     return _med_xy(pts)
 
 
-def detect_marks(boats, wind_from, legs_by_sail):
+def detect_marks(boats, wind_from, legs_by_sail, split_wing=False):
     """
     Locate the course marks at the fleet's actual rounding points by calling a
     dedicated detector per mark. Returns a list of {"label","ll":[lat,lon]}.
+    `split_wing`: the wing mark was moved between the two roundings (e.g. Prueba
+    2 & 5), so report 2a (1st rounding) and 2b (2nd) instead of a single 2.
     """
     wf = math.radians(wind_from)
     ux, uy = math.sin(wf), math.cos(wf)
@@ -559,9 +584,17 @@ def detect_marks(boats, wind_from, legs_by_sail):
     m1 = detect_windward_mark(boats, legs_by_sail, ux, uy)
     if m1:
         marks.append({"label": "1", "ll": m1})
-    m2 = detect_wing_mark(boats, legs_by_sail, ux, uy)
-    if m2:
-        marks.append({"label": "2", "ll": m2})
+    if split_wing:
+        a2 = _wing_rounding(boats, legs_by_sail, 0)   # 1st wing rounding (after reach)
+        b2 = _wing_rounding(boats, legs_by_sail, 1)   # 2nd (after the 2nd beat)
+        if a2:
+            marks.append({"label": "2a", "ll": a2})
+        if b2:
+            marks.append({"label": "2b", "ll": b2})
+    else:
+        m2 = detect_wing_mark(boats, legs_by_sail, ux, uy)
+        if m2:
+            marks.append({"label": "2", "ll": m2})
     for g in detect_gate(boats, legs_by_sail, ux, uy, lx, ly):
         marks.append({"label": "G", "ll": g})
     fin = detect_finish(boats, legs_by_sail)

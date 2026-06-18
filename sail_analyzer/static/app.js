@@ -129,9 +129,10 @@ function markBy(label){ return effMarks().filter(m=>m.label===label).map(m=>m.ll
 // later mark is never reached (shortened race / retirement) we stop there.
 function legsFromMarks(b){
   const M1=markBy('1')[0], M2=markBy('2')[0], G=markBy('G'), F=markBy('F')[0];
-  if(!M1||!M2||!G.length) return null;
-  const seq=[ {ll:[M1],k:'upwind'}, {ll:[M2],k:'reach'}, {ll:G,k:'downwind'},
-              {ll:[M2],k:'upwind'}, {ll:G,k:'downwind'}, {ll:(F?[F]:G),k:'reach'} ];
+  const M2a=markBy('2a')[0]||M2, M2b=markBy('2b')[0]||M2;   // wing-change: 2a reach, 2b 2nd beat
+  if(!M1||!M2a||!M2b||!G.length) return null;
+  const seq=[ {ll:[M1],k:'upwind'}, {ll:[M2a],k:'reach'}, {ll:G,k:'downwind'},
+              {ll:[M2b],k:'upwind'}, {ll:G,k:'downwind'}, {ll:(F?[F]:G),k:'reach'} ];
   const n=b.lat.length, R=70;
   const md=(i,lls)=>Math.min(...lls.map(ll=>distM(b.lat[i],b.lon[i],ll[0],ll[1])));
   const g0 = S.race.gun_t ? idxAt(b,S.race.gun_t) : 0;   // leg 1 starts at the gun
@@ -444,8 +445,66 @@ function card(parent,k,v,unit,fleetV,partnerV,dir,pname){
   parent.appendChild(d);
 }
 
+const mean = a => { a=a.filter(v=>v!=null); return a.length? a.reduce((x,y)=>x+y,0)/a.length : null; };
+function startDistSpeed(boat){
+  const r=S.race, rc=markBy('RC')[0], pin=markBy('Pin')[0]; if(!rc||!pin) return null;
+  const wf=r.wind_from*Math.PI/180, ux=Math.sin(wf), uy=Math.cos(wf);
+  const [ax,ay]=toXY(pin[0],pin[1]); const lp=ax*ux+ay*uy;
+  const s=sampleAt(boat,(r.gun_t||r.start_t)+1); if(!s.inrace) return null;
+  const [x,y]=toXY(s.lat,s.lon); return {behind:(x*ux+y*uy)-lp, sog:s.sog};
+}
+function keyFindings(body){
+  const f=focusB(), s=f.summary, fm=fleetMedians(), p=partnerB(), r=S.race;
+  const boats=r.boats.filter(o=>o.summary.race_min!=null);
+  const n=boats.length, rt=s.race_min, medRT=med(boats.map(o=>o.summary.race_min));
+  const rank=1+boats.filter(o=>o.summary.race_min<rt).length;     // finish by elapsed gun->finish time
+  const B=[];   // bullets
+  if(rt!=null&&medRT!=null) B.push(`Finished <b>P${rank}/${n}</b> by elapsed time (${rt} min, fleet median ${medRT.toFixed(1)}; ${fmtS(rt-medRT,1)} min).`);
+  // per-leg time vs fleet median
+  const nl=boatLegs(f).length, fast=[], slow=[];
+  for(let i=0;i<nl;i++){ const ts=boats.map(o=>{const lg=boatLegs(o); return lg[i]?(o.t[lg[i][1]]-o.t[lg[i][0]]):null;}).filter(x=>x!=null);
+    const mt=med(ts), lg=boatLegs(f)[i]; const ft=lg?f.t[lg[1]]-f.t[lg[0]]:null;
+    if(ft!=null&&mt!=null){ const d=ft-mt; if(d<-6)fast.push(i+1); else if(d>6)slow.push(i+1); } }
+  if(fast.length) B.push(`Gained on the fleet on leg${fast.length>1?'s':''} <b class="good">${fast.join(', ')}</b>; lost on leg${slow.length>1?'s':''} <b class="bad">${slow.join(', ')||'none'}</b>.`);
+  // speed/pointing/distance vs fleet
+  const sp=[]; if(s.sog_up!=null)sp.push(`upwind ${fmtS(s.sog_up-fm.sog_up)} kt`); if(s.sog_dn!=null)sp.push(`downwind ${fmtS(s.sog_dn-fm.sog_dn)} kt`);
+  B.push(`Speed vs fleet: ${sp.join(', ')}. Pointing ${fmtS(s.twa_up-fm.twa_up,0)}° (− = higher).`);
+  B.push(`Sailed <b>${s.dist_nm} NM</b> (${fmtS(s.dist_nm-fm.dist_nm)} vs fleet — ${s.dist_nm<=fm.dist_nm?'less = tighter':'more = extra distance'}). ${s.n_tacks} tacks, loss ${s.tack_loss??'–'} BL (${s.tack_loss!=null?fmtS(s.tack_loss-fm.tack_loss):'–'}).`);
+  const sd=startDistSpeed(f), flS=mean(boats.map(o=>{const m=startDistSpeed(o);return m?m.sog:null;}));
+  if(sd) B.push(`Start: ${Math.abs(Math.min(0,sd.behind)).toFixed(0)} m behind line at gun, ${sd.sog.toFixed(1)} kt (${flS!=null?fmtS(sd.sog-flS,1):'–'} vs fleet).`);
+  const lp=liftedPct(f), flp=mean(boats.map(liftedPct));
+  if(lp!=null&&flp!=null) B.push(`On the lifted tack ${lp.toFixed(0)}% of upwind (${fmtS(lp-flp,0)} pts vs fleet).`);
+  // headline: finish tier + dominant weakness
+  const spd=mean([s.sog_up-fm.sog_up, s.sog_dn-fm.sog_dn]);
+  const lp0=liftedPct(f), flp0=mean(boats.map(liftedPct)), sd0=startDistSpeed(f), flS0=mean(boats.map(o=>{const m=startDistSpeed(o);return m?m.sog:null;}));
+  const weak=[];
+  if(sd0&&flS0!=null&&sd0.sog-flS0<-0.4) weak.push('a slow start');
+  if(lp0!=null&&flp0!=null&&lp0-flp0<-8) weak.push('the wrong shifts/side');
+  if(spd<-0.05) weak.push('boatspeed');
+  if(s.dist_nm-fm.dist_nm>0.1) weak.push('extra distance');
+  let head;
+  if(rank<=n/3) head = spd>=0.03?'Strong — fast and well sailed.':'Good result from tactics/shifts/start, not raw speed.';
+  else if(rank>=2*n/3) head = 'Tough race, near the back'+(weak.length?` — cost mainly by ${weak[0]}.`:'.');
+  else head = spd>0.05?'Mid-fleet; boatspeed ok, places lost on tactics/start.':'Mid-fleet; small margins.';
+  // partner line
+  let pb='';
+  if(p){ const ps=p.summary; const dt=(rt!=null&&ps.race_min!=null)?(rt-ps.race_min)*60:null;
+    const pf=[]; for(let i=0;i<Math.min(nl,boatLegs(p).length);i++){ const lf=boatLegs(f)[i],lpg=boatLegs(p)[i];
+      if(lf&&lpg){ const d=(f.t[lf[1]]-f.t[lf[0]])-(p.t[lpg[1]]-p.t[lpg[0]]); if(d<-4)pf.push(i+1); } }
+    pb=`<div class="muted" style="margin-top:6px"><b style="color:var(--partner)">vs ${p.name}:</b> `+
+      (dt!=null?`crossed ~<b>${Math.abs(dt).toFixed(0)} s ${dt<=0?'ahead':'behind'}</b>, `:'')+
+      `sailed ${fmtS(s.dist_nm-ps.dist_nm)} NM (${s.dist_nm<=ps.dist_nm?'less':'more'}), faster on leg${pf.length>1?'s':''} ${pf.join(', ')||'—'}. `+
+      `Speed up ${fmtS((s.sog_up||0)-(ps.sog_up||0))}, dn ${fmtS((s.sog_dn||0)-(ps.sog_dn||0))} kt.</div>`;
+  }
+  body.insertAdjacentHTML('beforeend',`<div class="sectitle">Key findings — ${f.name}</div>
+    <div class="muted" style="font-size:13px;line-height:1.6"><b style="color:var(--fg)">${head}</b><ul style="margin:6px 0 0;padding-left:18px">`+
+    B.map(x=>`<li>${x}</li>`).join('')+`</ul></div>${pb}
+    <div class="muted" style="margin-top:6px;font-size:11px">Finish = rank by elapsed gun→finish time (all boats sail the same course). Per-leg "gained/lost" = leg time vs fleet median.</div>`);
+}
+function fmtS(d,dp=2){ return d==null||!isFinite(d)?'–':(d>=0?'+':'')+d.toFixed(dp); }
 function tabOverview(body){
   const f=focusB(), p=partnerB(), s=f.summary, fm=fleetMedians();
+  keyFindings(body);
   const ps=p?p.summary:null, pn=p?p.name.slice(0,9):null, pv=k=>ps?ps[k]:null;
   const grid=document.createElement('div'); grid.className='cards'; body.appendChild(grid);
   card(grid,'Avg speed',s.sog_mean,'kt',fm.sog_mean,pv('sog_mean'),1,pn);

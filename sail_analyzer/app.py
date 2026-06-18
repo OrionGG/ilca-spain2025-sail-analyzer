@@ -88,8 +88,10 @@ def build_race(race_dir: str, race_name: str):
     legs_by_sail = {b.sail: R.segment_legs(b, wind_from, gun_t=gun_t) for b in boats}
 
     # course marks at the fleet's actual rounding points (windward / wing /
-    # leeward gate / finish), located from the per-boat legs
-    marks = R.detect_marks(boats, wind_from, legs_by_sail)
+    # leeward gate / finish). Prueba 2 & 5 had a wing-mark change between the two
+    # roundings -> report 2a (1st) and 2b (2nd) separately.
+    split_wing = race_name.strip()[-2:] in (" 2", " 5")
+    marks = R.detect_marks(boats, wind_from, legs_by_sail, split_wing=split_wing)
 
     # start line at the gun, with its ends labelled: RC (committee boat, starboard
     # end) and Pin (port end). Starboard = +along-line (wind_from + 90 deg).
