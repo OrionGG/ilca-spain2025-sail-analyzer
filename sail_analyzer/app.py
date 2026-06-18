@@ -212,11 +212,15 @@ def discover_races():
 
 def ensure_cache(rebuild=False):
     os.makedirs(CACHE_DIR, exist_ok=True)
+    # auto-rebuild when the analysis code changed (so a plain restart picks up
+    # new logic instead of serving a stale cache)
+    src_mtime = max(os.path.getmtime(os.path.join(HERE, f)) for f in ("regatta.py", "app.py"))
     races = discover_races()
     index = []
     for i, (d, name) in enumerate(races):
         cpath = os.path.join(CACHE_DIR, f"race_{i}.json")
-        if rebuild or not os.path.exists(cpath):
+        stale = (not os.path.exists(cpath)) or os.path.getmtime(cpath) < src_mtime
+        if rebuild or stale:
             print(f"  parsing {name} ...", flush=True)
             data = build_race(d, name)
             if data is None:
