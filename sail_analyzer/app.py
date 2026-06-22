@@ -86,6 +86,12 @@ def build_race(race_dir: str, race_name: str):
     # anchored there so the pre-start is excluded from the race legs.
     gun_t = R.detect_gun(boats, wind_from)
     legs_by_sail = {b.sail: R.segment_legs(b, wind_from, gun_t=gun_t) for b in boats}
+    # a boat "finished" if it sailed the full course (>= the fleet's modal leg count);
+    # boats with fewer legs are retirees/DNF and are excluded from fleet metrics
+    _lc = {}
+    for lg in legs_by_sail.values():
+        _lc[len(lg)] = _lc.get(len(lg), 0) + 1
+    mode_legs = max(_lc, key=_lc.get) if _lc else 0
 
     # course marks at the fleet's actual rounding points (windward / wing /
     # leeward gate / finish). Prueba 2 & 5 had a wing-mark change between the two
@@ -112,9 +118,11 @@ def build_race(race_dir: str, race_name: str):
         marks.append({"label": "RC", "ll": rc})       # committee boat (starboard)
         marks.append({"label": "Pin", "ll": pin})     # pin end (port)
 
-    # fleet aggregate stats on the grid (resample each boat)
+    # fleet aggregate stats on the grid (FINISHERS only — exclude retirees/DNF)
     sog_grid, vmg_grid = [], []
     for b in boats:
+        if len(legs_by_sail.get(b.sail) or []) < mode_legs:
+            continue
         sog_grid.append(np.interp(grid, b.t, b.sog, left=np.nan, right=np.nan))
         vmg_grid.append(np.interp(grid, b.t, b.vmg, left=np.nan, right=np.nan))
     sog_grid = np.array(sog_grid); vmg_grid = np.array(vmg_grid)
@@ -143,6 +151,7 @@ def build_race(race_dir: str, race_name: str):
         gybes = [m for m in mans if m.kind == "gybe"]
         summary = {
             "n": int(fi - gi + 1),
+            "n_legs": len(legs), "finished": bool(len(legs) >= mode_legs),
             "race_min": round(float(b.t[fi] - b.t[gi]) / 60.0, 1),
             "dist_nm": round(dist_m / 1852.0, 2),
             "sog_mean": round(float(sog_s.mean()), 2),

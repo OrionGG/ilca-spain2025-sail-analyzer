@@ -178,7 +178,7 @@ function boatCourse(b){ return b._mcourse||b.course; }
 function legBest(){
   const nl=boatLegs(focusB()).length, best=[];
   for(let i=0;i<nl;i++){ let bt=Infinity,bb=null;
-    for(const o of S.race.boats){ const lg=boatLegs(o); if(i>=lg.length) continue;
+    for(const o of finishers()){ const lg=boatLegs(o); if(i>=lg.length) continue;   // ignore retirees
       const [a,c]=lg[i], tm=o.t[c]-o.t[a]; if(tm>0 && tm<bt){ bt=tm; bb={sail:o.sail,a,c,t:tm}; } }
     best.push(bb); }
   return best;
@@ -437,9 +437,10 @@ function buildLegBar(){
     S.legFilter = p.dataset.leg==='all' ? 'all' : +p.dataset.leg; setTab(S.tab); });
 }
 
+function finishers(){ const f=S.race.boats.filter(b=>b.summary.finished); return f.length?f:S.race.boats; }
 function fleetMedians(){
   const keys=['sog_mean','sog_up','sog_dn','twa_up','twa_dn','vmg_up','vmg_dn','n_tacks','n_gybes','tack_loss','gybe_loss','dist_nm'];
-  const o={}; for(const k of keys) o[k]=med(S.race.boats.map(b=>b.summary[k]));
+  const fl=finishers(), o={}; for(const k of keys) o[k]=med(fl.map(b=>b.summary[k]));   // finishers only
   return o;
 }
 
@@ -467,13 +468,13 @@ function startDistSpeed(boat){
 }
 function keyFindings(body){
   const f=focusB(), s=f.summary, fm=fleetMedians(), p=partnerB(), r=S.race;
-  const boats=r.boats.filter(o=>o.summary.race_min!=null);
+  const boats=finishers().filter(o=>o.summary.race_min!=null);   // exclude retirees/DNF
+  const nStarted=r.boats.length, nRet=nStarted-r.boats.filter(o=>o.summary.finished).length;
   const n=boats.length, rt=s.race_min, medRT=med(boats.map(o=>o.summary.race_min));
   const rank=1+boats.filter(o=>o.summary.race_min<rt).length;     // finish by elapsed gun->finish time
   const B=[];   // bullets
-  // how many rivals finish within the GPS finish-error band (~20s) of focus
   const close=boats.filter(o=>o.sail!==S.focus && Math.abs(o.summary.race_min-rt)*60<=20).length;
-  if(rt!=null&&medRT!=null) B.push(`Finished ~<b>P${rank}/${n}</b> by elapsed time (${rt} min, fleet median ${medRT.toFixed(1)}; ${fmtS(rt-medRT,1)} min)`+
+  if(rt!=null&&medRT!=null) B.push(`Finished ~<b>P${rank}/${n}</b>${nRet?` (of ${nStarted} started; ${nRet} retired)`:''} by elapsed time (${rt} min, fleet median ${medRT.toFixed(1)}; ${fmtS(rt-medRT,1)} min)`+
     (close>0?` — but ${close} boat${close>1?'s are':' is'} within GPS finish error (~20 s), so the exact place is uncertain.`:'.'));
   // per-leg time vs fleet median
   const nl=boatLegs(f).length, fast=[], slow=[];
@@ -648,7 +649,7 @@ function tabWind(body){
   const flp=liftedPct(f);
   let cmpLp, cmpName;
   if(S.liftCmp==='partner' && p){ cmpLp=liftedPct(p); cmpName=p.name; }
-  else { const all=S.race.boats.map(liftedPct).filter(v=>v!=null); cmpLp=all.length?all.reduce((a,b)=>a+b,0)/all.length:null; cmpName='Fleet average'; }
+  else { const all=finishers().map(liftedPct).filter(v=>v!=null); cmpLp=all.length?all.reduce((a,b)=>a+b,0)/all.length:null; cmpName='Fleet average'; }
   const bar=(name,v,col)=>v==null?`<div class="muted">${name}: no upwind data for this selection.</div>`:
     `<div class="barwrap"><span class="lbl" style="width:110px">${name}</span>
       <div class="bar" style="width:${Math.round(v)}%;background:${col}"></div><span>${Math.round(v)}%</span></div>`;
@@ -716,14 +717,12 @@ function tabStart(body){
     const d=(x*ux+y*uy)-lineperp;  // + = above line (over early), - = behind
     return {dist:d, sog:s.sog}; }
   const fm=startMetrics(f);
-  const fleetD=r.boats.map(bb=>startMetrics(bb).dist), fleetS=r.boats.map(bb=>startMetrics(bb).sog);
+  const fl=finishers(), fleetS=fl.map(bb=>startMetrics(bb).sog);
+  const myRank=1+fl.filter(bb=>startMetrics(bb).dist>fm.dist).length;   // nearer the line at gun = better
   const grid=document.createElement('div'); grid.className='cards'; body.appendChild(grid);
-  card(grid,'Dist behind line @ gun',Math.abs(Math.min(0,fm.dist)).toFixed(0),'m',null);
-  card(grid,'Speed @ gun',fm.sog.toFixed(2),'kt',fm.sog-med(fleetS));
-  // rank of distance (closest to line / least behind = best, among those behind)
-  const behind=fleetD.map((d,i)=>({d,i})).sort((p,q)=>q.d-p.d);
-  const myRank=behind.findIndex(o=>o.i===r.boats.indexOf(f))+1;
-  card(grid,'Line position',myRank+' / '+r.boats.length,'',null);
+  card(grid,'Dist behind line @ gun',Math.abs(Math.min(0,fm.dist)).toFixed(0),'m');
+  card(grid,'Speed @ gun',+fm.sog.toFixed(2),'kt',med(fleetS),null,1);
+  card(grid,'Line position',myRank+' / '+fl.length,'');
   // speed: final approach (gun-30s) + first 2 min off the line; gun line is drawn by the chart
   body.insertAdjacentHTML('beforeend','<div class="sectitle">Speed — approach &amp; build-up (dashed line = gun)</div>');
   const t0=Math.max(S.tMin,st-30),t1=st+120, fdata=[],pdata=[];
@@ -742,14 +741,15 @@ function tabStart(body){
 function tabPosition(body){
   const f=focusB(), p=partnerB(), r=S.race, fs=r.fleet_stats, G=fs.t;
   body.insertAdjacentHTML('beforeend','<div class="sectitle">Fleet position over time (1 = leading)</div>');
-  // rank each grid index by course progress (uses mark-derived legs if edited)
-  const C={}; for(const o of r.boats) C[o.sail]=boatCourse(o);
+  // rank each grid index by course progress, among FINISHERS (retirees excluded)
+  const pool=finishers().slice(); for(const b of [f,p]) if(b&&!pool.includes(b)) pool.push(b);
+  const C={}; for(const o of pool) C[o.sail]=boatCourse(o);
   const rankOf=(boat)=>{ const bc=C[boat.sail], out=[]; for(let k=0;k<G.length;k++){ const my=bc[k]; if(my==null){out.push([G[k],null]);continue;}
-      let rank=1; for(const o of r.boats){ const v=C[o.sail][k]; if(v!=null && v>my) rank++; } out.push([G[k],rank]); } return out; };
+      let rank=1; for(const o of pool){ const v=C[o.sail][k]; if(v!=null && v>my) rank++; } out.push([G[k],rank]); } return out; };
   const series=[{color:'#f5a623',w:2,data:rankOf(f)}];
   if(p) series.push({color:'#3aa0ff',w:1.7,data:rankOf(p)});
   const [xa,xb]=legWindow();
-  S.charts.push(makeChart(body,{h:220,xmin:xa,xmax:xb,ymin:r.boats.length+1,ymax:0,
+  S.charts.push(makeChart(body,{h:220,xmin:xa,xmax:xb,ymin:pool.length+1,ymax:0,
     series,legs:legSpans(f),fmtY:v=>v.toFixed(0)}));
   body.insertAdjacentHTML('beforeend',`<div class="muted" style="margin-top:8px">Position is estimated from cumulative
    distance made good along the course (made-good distance to each mark). Line going <b>up</b> = gaining places, <b>down</b>
@@ -759,12 +759,12 @@ function tabPosition(body){
   const rk=rankOf(f).filter(x=>x[1]!=null);
   if(rk.length){ body.insertAdjacentHTML('beforeend',`<div class="sectitle">Summary</div>
     <div class="muted">First clear position: <b>${rk[0][1]}</b> · Best: <b class="good">${Math.min(...rk.map(x=>x[1]))}</b>
-    · Worst: <b class="bad">${Math.max(...rk.map(x=>x[1]))}</b> · Final: <b>${rk[rk.length-1][1]}</b> of ${r.boats.length}.</div>`); }
+    · Worst: <b class="bad">${Math.max(...rk.map(x=>x[1]))}</b> · Final: <b>${rk[rk.length-1][1]}</b> of ${finishers().length} finishers.</div>`); }
 
   // closest to the ideal route = least time vs the fastest-demonstrated-per-leg total
   const it=idealTime(), nl=boatLegs(f).length;
   if(it>0){
-    const eff=r.boats.map(b=>({sail:b.sail,name:b.name,rt:raceTime(b),n:boatLegs(b).length}))
+    const eff=finishers().map(b=>({sail:b.sail,name:b.name,rt:raceTime(b),n:boatLegs(b).length}))
       .filter(x=>x.n>=nl && x.rt>0).map(x=>({...x,e:it/x.rt}));
     eff.sort((a,b)=>b.e-a.e);
     body.insertAdjacentHTML('beforeend','<div class="sectitle">Closest to the ideal route (toggle “Ideal route” on the map)</div>');
