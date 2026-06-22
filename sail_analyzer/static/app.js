@@ -328,8 +328,20 @@ function updateHover(){
   const s=sampleAt(f,S.t);
   let html=`<div class="h-name">${f.name}</div>`;
   if(s.inrace){
+    const av=w=>{ const lo=idxAt(f,S.t-w), hi=idxAt(f,S.t); let q=0,n=0; for(let k=lo;k<=hi;k++){q+=f.vmg[k];n++;} return n?(q/n).toFixed(2):'–'; };
+    // direction-aware "gain to mark": upwind=+VMG, downwind=-VMG, reach=SOG (higher always better)
+    const ci=idxAt(f,S.t); let kn='upwind'; for(const [a,c,k] of boatLegs(f)){ if(ci>=a&&ci<=c){kn=k;break;} }
+    const am=w=>{ const lo=idxAt(f,S.t-w), hi=idxAt(f,S.t); let q=0,n=0;
+      for(let k=lo;k<=hi;k++){ q+=(kn==='downwind'?-f.vmg[k]:kn==='reach'?f.sog[k]:f.vmg[k]); n++; } return n?q/n:0; };
+    const m5=am(5),m30=am(30),m180=am(180);
+    S._arrLast = S._arrLast||{};
+    const arr=(d,key)=>{ if(Math.abs(d)>=0.03) S._arrLast[key]= d>0?'up':'dn';   // tie -> keep last
+      const st=S._arrLast[key];
+      return st==='up'?'<b style="color:#3fb950">▲</b>':st==='dn'?'<b style="color:#f85149">▼</b>':'<b style="color:#8b949e">→</b>'; };
     html+=`SOG <b>${s.sog.toFixed(2)}</b> kt<br>TWA ${s.twa.toFixed(0)}° (${s.tack>0?'Stbd':'Port'})<br>`+
-          `VMG ${s.vmg.toFixed(2)} kt<br>COG ${s.cog.toFixed(0)}°`;
+          `VMG ${s.vmg.toFixed(2)} kt<br>COG ${s.cog.toFixed(0)}°<br>`+
+          `<span style="color:var(--mut)">avg VMG 5s ${av(5)} · 30s ${av(30)} · 3m ${av(180)}</span><br>`+
+          `<span style="color:var(--mut)">Technique 5v30 ${arr(m5-m30,'tech')} &nbsp; Strategy 30v3m ${arr(m30-m180,'strat')}</span>`;
     if(S.partner&&S.byS[S.partner]){
       const ps=sampleAt(S.byS[S.partner],S.t);
       if(ps.inrace){
@@ -459,7 +471,10 @@ function keyFindings(body){
   const n=boats.length, rt=s.race_min, medRT=med(boats.map(o=>o.summary.race_min));
   const rank=1+boats.filter(o=>o.summary.race_min<rt).length;     // finish by elapsed gun->finish time
   const B=[];   // bullets
-  if(rt!=null&&medRT!=null) B.push(`Finished <b>P${rank}/${n}</b> by elapsed time (${rt} min, fleet median ${medRT.toFixed(1)}; ${fmtS(rt-medRT,1)} min).`);
+  // how many rivals finish within the GPS finish-error band (~20s) of focus
+  const close=boats.filter(o=>o.sail!==S.focus && Math.abs(o.summary.race_min-rt)*60<=20).length;
+  if(rt!=null&&medRT!=null) B.push(`Finished ~<b>P${rank}/${n}</b> by elapsed time (${rt} min, fleet median ${medRT.toFixed(1)}; ${fmtS(rt-medRT,1)} min)`+
+    (close>0?` — but ${close} boat${close>1?'s are':' is'} within GPS finish error (~20 s), so the exact place is uncertain.`:'.'));
   // per-leg time vs fleet median
   const nl=boatLegs(f).length, fast=[], slow=[];
   for(let i=0;i<nl;i++){ const ts=boats.map(o=>{const lg=boatLegs(o); return lg[i]?(o.t[lg[i][1]]-o.t[lg[i][0]]):null;}).filter(x=>x!=null);
@@ -491,15 +506,17 @@ function keyFindings(body){
   if(p){ const ps=p.summary; const dt=(rt!=null&&ps.race_min!=null)?(rt-ps.race_min)*60:null;
     const pf=[]; for(let i=0;i<Math.min(nl,boatLegs(p).length);i++){ const lf=boatLegs(f)[i],lpg=boatLegs(p)[i];
       if(lf&&lpg){ const d=(f.t[lf[1]]-f.t[lf[0]])-(p.t[lpg[1]]-p.t[lpg[0]]); if(d<-4)pf.push(i+1); } }
-    pb=`<div class="muted" style="margin-top:6px"><b style="color:var(--partner)">vs ${p.name}:</b> `+
-      (dt!=null?`crossed ~<b>${Math.abs(dt).toFixed(0)} s ${dt<=0?'ahead':'behind'}</b>, `:'')+
+    const finishTxt = dt==null ? '' :
+      (Math.abs(dt)<=20 ? `<b>near-dead-heat</b> (~${Math.abs(dt).toFixed(0)} s — within GPS finish error, true order from official results), `
+                        : `crossed ~<b>${Math.abs(dt).toFixed(0)} s ${dt<=0?'ahead':'behind'}</b>, `);
+    pb=`<div class="muted" style="margin-top:6px"><b style="color:var(--partner)">vs ${p.name}:</b> `+ finishTxt +
       `sailed ${fmtS(s.dist_nm-ps.dist_nm)} NM (${s.dist_nm<=ps.dist_nm?'less':'more'}), faster on leg${pf.length>1?'s':''} ${pf.join(', ')||'—'}. `+
       `Speed up ${fmtS((s.sog_up||0)-(ps.sog_up||0))}, dn ${fmtS((s.sog_dn||0)-(ps.sog_dn||0))} kt.</div>`;
   }
   body.insertAdjacentHTML('beforeend',`<div class="sectitle">Key findings — ${f.name}</div>
     <div class="muted" style="font-size:13px;line-height:1.6"><b style="color:var(--fg)">${head}</b><ul style="margin:6px 0 0;padding-left:18px">`+
     B.map(x=>`<li>${x}</li>`).join('')+`</ul></div>${pb}
-    <div class="muted" style="margin-top:6px;font-size:11px">Finish = rank by elapsed gun→finish time (all boats sail the same course). Per-leg "gained/lost" = leg time vs fleet median.</div>`);
+    <div class="muted" style="margin-top:6px;font-size:11px">Finish = GPS estimate by elapsed gun→finish time (±~20 s — the finish line isn't in the data, so close places may differ from official results). Per-leg "gained/lost" = leg time vs fleet median.</div>`);
 }
 function fmtS(d,dp=2){ return d==null||!isFinite(d)?'–':(d>=0?'+':'')+d.toFixed(dp); }
 function tabOverview(body){
