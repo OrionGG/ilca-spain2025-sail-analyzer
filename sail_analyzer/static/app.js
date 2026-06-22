@@ -334,14 +334,16 @@ function updateHover(){
     const am=w=>{ const lo=idxAt(f,S.t-w), hi=idxAt(f,S.t); let q=0,n=0;
       for(let k=lo;k<=hi;k++){ q+=(kn==='downwind'?-f.vmg[k]:kn==='reach'?f.sog[k]:f.vmg[k]); n++; } return n?q/n:0; };
     const m5=am(5),m30=am(30),m180=am(180);
-    S._arrLast = S._arrLast||{};
-    const arr=(d,key)=>{ if(Math.abs(d)>=0.03) S._arrLast[key]= d>0?'up':'dn';   // tie -> keep last
-      const st=S._arrLast[key];
-      return st==='up'?'<b style="color:#3fb950">▲</b>':st==='dn'?'<b style="color:#f85149">▼</b>':'<b style="color:#8b949e">→</b>'; };
+    // 3-state vs the reference tier (the longer window): neutral = within ±3% of it
+    // (self-scaling dead zone, so steady sailing reads neutral; colour = real change).
+    // steady (within ±3% of reference) or rising = green ▲ ("fine, keep going"); only a
+    // genuine drop below the dead zone = red ▼.
+    const arr=(short,long)=>{ const dead=0.03*Math.abs(long), d=short-long;
+      return d<-dead?'<b style="color:#f85149">▼</b>':'<b style="color:#3fb950">▲</b>'; };
     html+=`SOG <b>${s.sog.toFixed(2)}</b> kt<br>TWA ${s.twa.toFixed(0)}° (${s.tack>0?'Stbd':'Port'})<br>`+
           `VMG ${s.vmg.toFixed(2)} kt<br>COG ${s.cog.toFixed(0)}°<br>`+
           `<span style="color:var(--mut)">avg VMG 5s ${av(5)} · 30s ${av(30)} · 3m ${av(180)}</span><br>`+
-          `<span style="color:var(--mut)">Technique 5v30 ${arr(m5-m30,'tech')} &nbsp; Strategy 30v3m ${arr(m30-m180,'strat')}</span>`;
+          `<span style="color:var(--mut)">Technique 5v30 ${arr(m5,m30)} &nbsp; Strategy 30v3m ${arr(m30,m180)}</span>`;
     if(S.partner&&S.byS[S.partner]){
       const ps=sampleAt(S.byS[S.partner],S.t);
       if(ps.inrace){
