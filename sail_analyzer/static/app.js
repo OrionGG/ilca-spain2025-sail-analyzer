@@ -213,6 +213,7 @@ function renderBG(){
       bgx.beginPath(); wps.forEach((p,i)=>{ const [x,y]=proj(p[0],p[1]); i?bgx.lineTo(x,y):bgx.moveTo(x,y); }); bgx.stroke(); bgx.setLineDash([]); } }
   // course marks (1 = windward, 2 = wing/reach, G = gate, F = finish, RC/Pin = start)
   for(const m of effMarks()) drawMark(m.ll, m.label);
+  if(S.showTacks) drawTackCalls();   // focus tack-decision markers
   // partner full track
   if(S.partner && S.byS[S.partner]) drawTrackColored(S.byS[S.partner], 'var(--partner)', 'rgba(58,160,255,.9)');
   // focus full track (colored by mode)
@@ -665,6 +666,47 @@ function tabWind(body){
     Higher = you sailed the headers and tacked onto the lifts.${typeof S.legFilter==='number'?' (this upwind leg only)':''}</div>`);
 }
 
+// ---------- tack-decision analysis (focus, upwind) ----------
+function _wrapd(d){ return ((d+540)%360)-180; }
+function windAtT(t){ const ws=S.race.wind_series; let i=0; while(i<ws.t.length-1&&ws.t[i]<t)i++;
+  return ws.dir[i]!=null?ws.dir[i]:S.race.wind_from; }
+function meanWind(t0,t1){ const ws=S.race.wind_series; let sx=0,sy=0,n=0;
+  for(let i=0;i<ws.t.length;i++){ if(ws.t[i]>=t0&&ws.t[i]<=t1&&ws.dir[i]!=null){ const r=ws.dir[i]*Math.PI/180; sx+=Math.cos(r);sy+=Math.sin(r);n++;} }
+  return n?(Math.atan2(sy,sx)*180/Math.PI+360)%360:S.race.wind_from; }
+// headed amount (deg, + = being headed on this tack) vs the leg-mean wind
+function headedDeg(f,i,bw){ return (f.tack[i]>0?-1:1)*_wrapd(windAtT(f.t[i])-bw); }
+function tackDecisions(f){
+  const real=[], missed=[], THR=5, DUR=20;
+  for(const [a,c,k] of boatLegs(f)){ if(k!=='upwind') continue;
+    const bw=meanWind(f.t[a],f.t[c]), cutoff=f.t[a]+(f.t[c]-f.t[a])*0.8;   // skip last 20% = layline
+    const tacks=(f.maneuvers||[]).filter(m=>m.kind==='tack'&&m.t>=f.t[a]&&m.t<=f.t[c]);
+    for(const m of tacks){ // avg headed over a window before the tack (robust to noise)
+      const lo=idxAt(f,m.t-18), hi=idxAt(f,m.t-5); let q=0,nq=0;
+      for(let i=lo;i<=hi;i++){ q+=headedDeg(f,i,bw); nq++; } const h=nq?q/nq:0;
+      let good=null, reason='small shift — likely a layline / clear-air / fleet call';
+      if(h>3){good=true; reason=`tacked on a ${h.toFixed(0)}° header → onto the lift`;}
+      else if(h<-3){good=false; reason=`tacked while lifted ${(-h).toFixed(0)}° → gave up a lift`;}
+      real.push({t:m.t,lat:m.lat,lon:m.lon,good,reason}); }
+    // missed: sustained header (>THR for >=DUR s) with no tack -> should have tacked
+    const runs=[]; let rs=null;
+    for(let i=a;i<=c;i++){ const bad=headedDeg(f,i,bw)>THR && f.t[i]<cutoff;
+      if(bad){ if(rs==null)rs=i; } else { if(rs!=null){runs.push([rs,i-1]);rs=null;} } }
+    if(rs!=null)runs.push([rs,c]);
+    for(const [s,e] of runs){ if(f.t[e]-f.t[s]<DUR) continue;
+      if(tacks.some(m=>m.t>=f.t[s]-5&&m.t<=f.t[e]+5)) continue; const mid=(s+e)>>1;
+      missed.push({t:f.t[s],lat:f.lat[mid],lon:f.lon[mid],deg:headedDeg(f,mid,bw),dur:Math.round(f.t[e]-f.t[s])}); }
+  }
+  return {real,missed};
+}
+function drawTackCalls(){
+  const f=S.byS[S.focus]; if(!f) return; const td=tackDecisions(f);
+  for(const m of td.missed){ const [x,y]=proj(m.lat,m.lon); bgx.strokeStyle='#ffb000'; bgx.lineWidth=2*DPR;
+    bgx.beginPath(); bgx.arc(x,y,8*DPR,0,7); bgx.stroke();
+    bgx.fillStyle='#ffb000'; bgx.font=`bold ${12*DPR}px sans-serif`; bgx.fillText('!',x-2*DPR,y-10*DPR); }
+  for(const t of td.real){ const [x,y]=proj(t.lat,t.lon);
+    bgx.strokeStyle=t.good===true?'#3fb950':t.good===false?'#f85149':'#8b949e';
+    bgx.lineWidth=3*DPR; bgx.beginPath(); bgx.arc(x,y,6*DPR,0,7); bgx.stroke(); }
+}
 function tabManeuvers(body){
   const f=focusB();
   body.insertAdjacentHTML('beforeend','<div class="sectitle">Tacks & gybes — maneuver loss</div>');
@@ -703,6 +745,26 @@ function tabManeuvers(body){
   fb.querySelectorAll('[data-f]').forEach(p=>p.onclick=()=>{ fb.querySelectorAll('[data-f]').forEach(z=>z.classList.toggle('on',z===p)); kindF=p.dataset.f; draw(); });
   fb.querySelectorAll('[data-q]').forEach(p=>p.onclick=()=>{ fb.querySelectorAll('[data-q]').forEach(z=>z.classList.toggle('on',z===p)); qF=p.dataset.q; draw(); });
   draw();
+
+  // tack-decision review (upwind): graded real tacks + missed shifts
+  const td=tackDecisions(f);
+  body.insertAdjacentHTML('beforeend','<div class="sectitle">Tack decisions — upwind (toggle “Tack calls” on the map)</div>');
+  const ng=td.real.filter(x=>x.good===true).length, nb=td.real.filter(x=>x.good===false).length;
+  const tdWrap=document.createElement('div'); body.appendChild(tdWrap);
+  if(!td.real.length && !td.missed.length){ tdWrap.innerHTML='<div class="muted">No upwind tacks or clear missed shifts detected.</div>'; }
+  else {
+    const rows=[...td.real.map(x=>({t:x.t,type:'tack',good:x.good,txt:x.reason})),
+                ...td.missed.map(x=>({t:x.t,type:'missed',good:false,txt:`headed ${x.deg.toFixed(0)}° for ${x.dur}s — should have tacked onto the lift`}))]
+               .sort((a,b)=>a.t-b.t);
+    let h=`<div class="muted" style="margin-bottom:8px"><b class="good">${ng} good</b> · <b class="bad">${nb} poor</b> tack${td.real.length!==1?'s':''}, <b style="color:#ffb000">${td.missed.length} missed</b> shift${td.missed.length!==1?'s':''}. Click a row to jump.</div>`;
+    h+='<table><tr><th>Time</th><th>Call</th><th>Verdict</th></tr>';
+    for(const r of rows){ const v=r.type==='missed'?'<b style="color:#ffb000">MISSED</b>':r.good===true?'<b class="good">GOOD</b>':r.good===false?'<b class="bad">POOR</b>':'<b style="color:#8b949e">—</b>';
+      h+=`<tr class="man" data-tt="${r.t}"><td>${fmtT(r.t-S.tMin)}</td><td>${r.type==='missed'?'missed shift':'tack'}</td><td>${v} ${r.txt}</td></tr>`; }
+    h+='</table>'; tdWrap.innerHTML=h;
+    tdWrap.querySelectorAll('tr[data-tt]').forEach(tr=>tr.onclick=()=>{ S.t=+tr.dataset.tt;
+      if(!S.showTacks){ S.showTacks=true; document.querySelector('#tacksBtn').classList.add('on'); renderBG(); } syncTime(); });
+  }
+  body.insertAdjacentHTML('beforeend','<div class="muted" style="font-size:11px;margin-top:6px">Verdict vs the leg-mean wind: GOOD = tacked onto a header (the lift); POOR = tacked while lifted (gave up gain); MISSED = headed >6° for >25 s with no tack. Heuristic from estimated wind — laylines/clear-air calls show as “—”.</div>');
 }
 
 function zoomTo(t){ /* keep current view; dots will show. Could implement zoom later. */ }
@@ -843,6 +905,7 @@ $('#timeRange').oninput=e=>{ S.t=S.tMin+(e.target.value/1000)*(S.tMax-S.tMin); i
 $('#fitBtn').onclick=()=>{ computeView(); renderBG(); render(); };
 $('#fleetBtn').onclick=e=>{ S.showFleet=!S.showFleet; e.target.classList.toggle('on',S.showFleet); render(); };
 $('#idealBtn').onclick=e=>{ S.showIdeal=!S.showIdeal; e.target.classList.toggle('on',S.showIdeal); renderBG(); render(); };
+$('#tacksBtn').onclick=e=>{ S.showTacks=!S.showTacks; e.target.classList.toggle('on',S.showTacks); renderBG(); render(); };
 document.querySelectorAll('#maptools [data-mode]').forEach(btn=>btn.onclick=()=>{
   S.colorMode=btn.dataset.mode; document.querySelectorAll('#maptools [data-mode]').forEach(b=>b.classList.toggle('on',b===btn));
   renderBG(); render(); drawLegend(); });
