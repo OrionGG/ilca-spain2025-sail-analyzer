@@ -99,6 +99,45 @@ def build_race(race_dir: str, race_name: str):
     split_wing = race_name.strip()[-2:] in (" 2", " 5")
     marks = R.detect_marks(boats, wind_from, legs_by_sail, split_wing=split_wing)
 
+    # ---- finish times by LINE CROSSING (not leg end, which drifts minutes) ----
+    # Finish line: through the fleet-median last-turn apex, perpendicular to the
+    # fleet-median final-leg direction. A boat finishes the first time its
+    # projection along that direction passes the apex. Same reference for all
+    # boats -> reliable finish ORDER (validated against official results).
+    apexes, fdirs = [], []
+    for b in boats:
+        lg = legs_by_sail[b.sail]
+        if len(lg) != mode_legs or not lg:
+            continue
+        a, c, _ = lg[-1]
+        j = R._refine_turn(b, c)                    # sharpest turn ~ the line
+        apexes.append((b.x[j], b.y[j]))
+        dx, dy = b.x[c] - b.x[a], b.y[c] - b.y[a]
+        nn = float(np.hypot(dx, dy))
+        if nn > 1:
+            fdirs.append((dx / nn, dy / nn))
+    finish_t = {}
+    if len(apexes) >= 5 and fdirs:
+        Fx = float(np.median([q[0] for q in apexes])); Fy = float(np.median([q[1] for q in apexes]))
+        fux = float(np.median([v[0] for v in fdirs])); fuy = float(np.median([v[1] for v in fdirs]))
+        nn = float(np.hypot(fux, fuy)); fux /= nn; fuy /= nn
+    else:
+        Fx = None
+    for b in boats:
+        lg = legs_by_sail[b.sail]
+        if not lg:
+            continue
+        a, c, _ = lg[-1]
+        ft = float(b.t[c])
+        if Fx is not None and len(lg) == mode_legs:
+            # search from the leg start to the END OF TRACK: the leg-end trim can
+            # stop short of the line, which would otherwise bias that boat late
+            proj = (b.x[a:] - Fx) * fux + (b.y[a:] - Fy) * fuy
+            hit = np.where(proj >= 0)[0]
+            if len(hit):
+                ft = float(b.t[a + int(hit[0])])
+        finish_t[b.sail] = ft
+
     # start line at the gun, with its ends labelled: RC (committee boat, starboard
     # end) and Pin (port end). Starboard = +along-line (wind_from + 90 deg).
     start_t = float(gun_t)
@@ -117,6 +156,39 @@ def build_race(race_dir: str, race_name: str):
         start_line = [pin, rc]
         marks.append({"label": "RC", "ll": rc})       # committee boat (starboard)
         marks.append({"label": "Pin", "ll": pin})     # pin end (port)
+
+    # ---- mark-rounding times by PROXIMITY (first close approach to each buoy) ----
+    # Leg boundaries come from ~60s-smoothed VMG, so their times are far too noisy
+    # to order the fleet at a mark; the actual closest pass is sharp and reliable.
+    cosLat = float(np.cos(np.radians(lat0)))
+    def _ll_xy(ll):
+        return ((ll[1] - lon0) * 111320.0 * cosLat, (ll[0] - lat0) * 111320.0)
+    _mk = {}
+    for m in marks:
+        _mk.setdefault(m["label"], []).append(_ll_xy(m["ll"]))
+    _w2 = _mk.get("2a", _mk.get("2", [])); _w2b = _mk.get("2b", _mk.get("2", []))
+    _gts = _mk.get("G", []); _fin = _mk.get("F", [])
+    seq_xy = [_mk.get("1", []), _w2, _gts, _w2b, _gts, _fin]      # targets per leg end
+    rounds_by_sail = {}
+    for b in boats:
+        lg = legs_by_sail[b.sail]
+        gi0 = int(np.argmin(np.abs(b.t - gun_t)))
+        rounds, k0 = [], gi0
+        for li in range(len(lg)):
+            tgts = seq_xy[li] if li < len(seq_xy) else []
+            if not tgts or k0 >= len(b.t) - 2:
+                rounds.append(None); continue
+            dist = np.min(np.stack([np.hypot(b.x[k0:] - tx, b.y[k0:] - ty)
+                                    for tx, ty in tgts]), axis=0)
+            near = np.where(dist < 100.0)[0]
+            if len(near):
+                j = int(near[0])
+                while j + 1 < len(dist) and dist[j + 1] <= dist[j]:
+                    j += 1                                          # walk to the local apex
+            else:
+                j = int(np.argmin(dist))                            # never close: best pass
+            rounds.append(float(b.t[k0 + j])); k0 = k0 + j + 1
+        rounds_by_sail[b.sail] = rounds
 
     # fleet aggregate stats on the grid (FINISHERS only — exclude retirees/DNF)
     sog_grid, vmg_grid = [], []
@@ -152,7 +224,7 @@ def build_race(race_dir: str, race_name: str):
         summary = {
             "n": int(fi - gi + 1),
             "n_legs": len(legs), "finished": bool(len(legs) >= mode_legs),
-            "race_min": round(float(b.t[fi] - b.t[gi]) / 60.0, 1),
+            "race_min": round(float(finish_t.get(b.sail, b.t[fi]) - gun_t) / 60.0, 2),
             "dist_nm": round(dist_m / 1852.0, 2),
             "sog_mean": round(float(sog_s.mean()), 2),
             "sog_up": round(float(sog_s[up].mean()), 2) if up.any() else None,
@@ -182,6 +254,7 @@ def build_race(race_dir: str, race_name: str):
 
         prog = progress.get(b.sail)
         boats_out.append({
+            "rounds": [None if v is None else int(round(v)) for v in rounds_by_sail.get(b.sail, [])],
             "course": rnan(course_grid, 0),
             "sail": b.sail, "name": b.name, "color": PALETTE[i % len(PALETTE)],
             "t": r0(b.t), "lat": r6(b.lat), "lon": r6(b.lon),
@@ -239,8 +312,27 @@ def ensure_cache(rebuild=False):
         # read minimal header for the index
         with open(cpath, "r", encoding="utf-8") as fh:
             data = json.load(fh)
+        # regatta trends: per-boat mini-summary + finisher medians + finish rank
+        import statistics as _st
+        fin = [b for b in data["boats"] if b["summary"].get("finished")]
+        def _med(k):
+            vals = [b["summary"][k] for b in fin if b["summary"].get(k) is not None]
+            return round(_st.median(vals), 2) if vals else None
+        keys = ("race_min", "sog_up", "sog_dn", "vmg_up", "vmg_dn", "twa_up",
+                "tack_loss", "gybe_loss", "dist_nm", "n_tacks", "n_gybes")
+        fleet = {k: _med(k) for k in keys}
+        order = sorted([b for b in fin if b["summary"].get("race_min") is not None],
+                       key=lambda b: b["summary"]["race_min"])
+        rank = {b["sail"]: j + 1 for j, b in enumerate(order)}
+        mini = {}
+        for b in data["boats"]:
+            s = b["summary"]
+            mini[b["sail"]] = {**{k: s.get(k) for k in keys},
+                               "finished": s.get("finished"),
+                               "rank": rank.get(b["sail"]), "n_fin": len(order)}
         index.append({"i": i, "race": data["race"], "start_iso": data["start_iso"],
-                      "wind_from": data["wind_from"], "n_boats": len(data["boats"])})
+                      "wind_from": data["wind_from"], "n_boats": len(data["boats"]),
+                      "fleet": fleet, "boats": mini})
     with open(os.path.join(CACHE_DIR, "index.json"), "w", encoding="utf-8") as fh:
         json.dump(index, fh)
     return index

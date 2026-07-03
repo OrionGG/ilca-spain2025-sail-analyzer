@@ -379,11 +379,13 @@ function makeChart(parent, opts){
     let xmin=opts.xmin, xmax=opts.xmax, ymin=opts.ymin, ymax=opts.ymax;
     if(ymin==null){ ymin=1e9;ymax=-1e9; for(const s of opts.series) for(const p of s.data){ if(p[1]==null)continue; if(p[1]<ymin)ymin=p[1]; if(p[1]>ymax)ymax=p[1]; } const pad=(ymax-ymin)*.1||1; ymin-=pad;ymax+=pad; }
     const X=t=>L+(t-xmin)/(xmax-xmin)*pw, Y=v=>T+(1-(v-ymin)/(ymax-ymin))*ph;
-    const gun=S.race&&S.race.gun_t;
+    const isTime=!opts.fmtX;                       // race-number axes: no gun/pre-start shading
+    const gun=isTime&&S.race&&S.race.gun_t;
+    const fx=opts.fmtX||(t=>fmtT(t-S.tMin));
     // gridlines + axis labels (drawn first, unclipped so labels sit in the margins)
     c.strokeStyle='#222a35'; c.fillStyle='#8b949e'; c.font='10px sans-serif'; c.lineWidth=1;
     for(let g=0;g<=4;g++){ const v=ymin+(ymax-ymin)*g/4, y=Y(v); c.beginPath();c.moveTo(L,y);c.lineTo(w-R,y);c.stroke(); c.fillText((opts.fmtY?opts.fmtY(v):v.toFixed(1)),2,y+3); }
-    for(let g=0;g<=5;g++){ const t=xmin+(xmax-xmin)*g/5; c.fillText(fmtT(t-S.tMin),X(t)-12,h-6); }
+    for(let g=0;g<=5;g++){ const t=xmin+(xmax-xmin)*g/5; c.fillText(fx(t),X(t)-12,h-6); }
     // all data drawing is clipped to the plot rect (so a zoomed leg window can't overflow)
     c.save(); c.beginPath(); c.rect(L,T,pw,ph); c.clip();
     if(gun && gun>xmin){ c.fillStyle='rgba(140,150,165,.10)'; c.fillRect(X(xmin),T,X(Math.min(gun,xmax))-X(xmin),ph); }
@@ -416,7 +418,7 @@ function setTab(name){
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===name));
   buildLegBar();
   const body=$('#tabbody'); body.innerHTML='';
-  ({overview:tabOverview,speed:tabSpeed,vmg:tabVMG,wind:tabWind,maneuvers:tabManeuvers,start:tabStart,position:tabPosition}[name])(body);
+  ({overview:tabOverview,speed:tabSpeed,vmg:tabVMG,wind:tabWind,maneuvers:tabManeuvers,start:tabStart,position:tabPosition,regatta:tabRegatta}[name])(body);
   S.charts.forEach(c=>c.draw());
 }
 function focusB(){ return S.byS[S.focus]; }
@@ -822,6 +824,32 @@ function tabPosition(body){
    distance made good along the course (made-good distance to each mark). Line going <b>up</b> = gaining places, <b>down</b>
    = losing. This is a GPS proxy for race rank — penalties, OCS and protests aren't reflected.
    Background = <b style="color:#6ea3ff">upwind</b> / <b style="color:#6edc8c">reach</b> / <b style="color:#ff7b54">downwind</b> legs.</div>`);
+  // position at each mark rounding: rank by arrival time at each leg end
+  // (final leg ranked by race_min = finish-line crossing)
+  body.insertAdjacentHTML('beforeend','<div class="sectitle">Position at each mark (rounding order)</div>');
+  const NL=Math.max(...pool.map(o=>boatLegs(o).length));
+  const MLBL=['M1','M2','Gate','M2 (2nd)','Gate (2nd)','Finish'];
+  // rounding time: mark-proximity (server 'rounds', sharp) >> leg-boundary (smoothed)
+  const roundT=(boat,i)=>{ const rr=boat.rounds; if(rr&&rr[i]!=null) return rr[i];
+    const lg=boatLegs(boat); return lg[i]?boat.t[lg[i][1]]:null; };
+  const rankAtLeg=(boat,i)=>{ const myT=roundT(boat,i); if(myT==null) return null;
+    let rk2=1;
+    for(const o of pool){ if(o===boat) continue; const oT=roundT(o,i);
+      if(oT!=null && oT<myT) rk2++; }
+    return rk2; };
+  let mt=`<table><tr><th>Boat</th>${Array.from({length:NL},(_,i)=>`<th>${MLBL[i]||('L'+(i+1))}</th>`).join('')}</tr>`;
+  const rowFor=(boat,color)=>{ let prev=null, tds='';
+    for(let i=0;i<NL;i++){ const rk2=rankAtLeg(boat,i);
+      const d=(rk2!=null&&prev!=null)?rk2-prev:null; if(rk2!=null)prev=rk2;
+      const badge=d==null||d===0?'':` <span class="${d<0?'good':'bad'}" style="font-size:10px">${d<0?'+'+(-d):'−'+d}</span>`;
+      tds+=`<td>${rk2==null?'–':'P'+rk2}${badge}</td>`; }
+    return `<tr><td style="color:${color}">${boat.name.slice(0,12)}</td>${tds}</tr>`; };
+  mt+=rowFor(f,'var(--focus)'); if(p) mt+=rowFor(p,'var(--partner)');
+  mt+='</table>'; body.insertAdjacentHTML('beforeend',mt);
+  body.insertAdjacentHTML('beforeend',`<div class="muted" style="margin-top:4px;font-size:11px">P = place at that mark
+   (order the fleet rounded it); green/red = places gained/lost on the leg just sailed. Mark ranks come from rounding
+   times (robust); the Finish column uses the finish-line crossing (±~20 s in packs). Retirees excluded.</div>`);
+
   // gains/losses summary
   const rk=rankOf(f).filter(x=>x[1]!=null);
   if(rk.length){ body.insertAdjacentHTML('beforeend',`<div class="sectitle">Summary</div>
@@ -848,6 +876,66 @@ function tabPosition(body){
 function row_eff(rank,x,it){ const lost=x.rt-it; const me=x.sail===S.focus;
   return `<tr${me?' style="background:var(--panel2)"':''}><td>${rank}</td><td>${me?'<b>'+x.name+'</b>':x.name}</td>`+
     `<td><b class="${x.e>=0.95?'good':x.e<0.88?'bad':''}">${(x.e*100).toFixed(0)}%</b></td><td>+${fmtT(lost)}</td></tr>`; }
+
+// ---------- Regatta tab: trends across all races ----------
+function tabRegatta(body){
+  const idx=S.index||[], p=partnerB(), pn=p?p.name.slice(0,10):null;
+  const rows=idx.map(r=>({x:r.i+1, race:r.race, fl:r.fleet||{}, me:(r.boats||{})[S.focus]||null,
+                          pr:p?((r.boats||{})[S.partner]||null):null}));
+  if(!rows.length || !rows.some(r=>r.me)){ body.insertAdjacentHTML('beforeend','<div class="muted">No regatta summary — restart the server to rebuild the index.</div>'); return; }
+  const N=rows.length, fmtX=t=>'R'+Math.round(t);
+  const opt={xmin:0.5, xmax:N+0.5, fmtX};
+  const dser=(get,color,w)=>({color,w:w||2,data:rows.map(r=>[r.x,get(r)])});
+  const dots=(get,color)=>rows.map(r=>({t:r.x,y:get(r),color})).filter(m=>m.y!=null);
+  const dlt=(r,k,src)=> (src&&src[k]!=null&&r.fl[k]!=null)? +(src[k]-r.fl[k]).toFixed(2) : null;
+
+  // 1) finish place
+  body.insertAdjacentHTML('beforeend','<div class="sectitle">Finish place by race (1 = winner, finishers only)</div>');
+  const maxFin=Math.max(...rows.map(r=>r.me&&r.me.n_fin||0),10);
+  S.charts.push(makeChart(body,{...opt,h:170,ymin:maxFin+1,ymax:0,fmtY:v=>v.toFixed(0),
+    series:[dser(r=>r.me?r.me.rank:null,'#f5a623')].concat(p?[dser(r=>r.pr?r.pr.rank:null,'#3aa0ff',1.6)]:[]),
+    marks:dots(r=>r.me?r.me.rank:null,'#f5a623').concat(p?dots(r=>r.pr?r.pr.rank:null,'#3aa0ff'):[])}));
+
+  // 2) speed deltas vs fleet
+  body.insertAdjacentHTML('beforeend','<div class="sectitle">Speed vs fleet median (kt, + = faster)</div>');
+  S.charts.push(makeChart(body,{...opt,h:170,fmtY:v=>v.toFixed(2),
+    series:[dser(r=>dlt(r,'sog_up',r.me),'#4aa3ff'),dser(r=>dlt(r,'sog_dn',r.me),'#ff7b54')],
+    marks:dots(r=>dlt(r,'sog_up',r.me),'#4aa3ff').concat(dots(r=>dlt(r,'sog_dn',r.me),'#ff7b54'))}));
+  body.insertAdjacentHTML('beforeend',`<div class="muted"><span class="dot" style="background:#4aa3ff"></span> upwind &nbsp; <span class="dot" style="background:#ff7b54"></span> downwind — above 0 = faster than the fleet.</div>`);
+
+  // 3) tack loss + distance deltas
+  body.insertAdjacentHTML('beforeend','<div class="sectitle">Tack loss (BL) &amp; distance (NM) vs fleet (below 0 = better)</div>');
+  S.charts.push(makeChart(body,{...opt,h:170,fmtY:v=>v.toFixed(2),
+    series:[dser(r=>dlt(r,'tack_loss',r.me),'#e6c229'),dser(r=>dlt(r,'dist_nm',r.me),'#bf7bff')],
+    marks:dots(r=>dlt(r,'tack_loss',r.me),'#e6c229').concat(dots(r=>dlt(r,'dist_nm',r.me),'#bf7bff'))}));
+  body.insertAdjacentHTML('beforeend',`<div class="muted"><span class="dot" style="background:#e6c229"></span> tack loss &nbsp; <span class="dot" style="background:#bf7bff"></span> distance sailed.</div>`);
+
+  // 4) per-race table
+  body.insertAdjacentHTML('beforeend','<div class="sectitle">Per race</div>');
+  let h=`<table><tr><th>Race</th><th>Place</th><th>ΔUp kt</th><th>ΔDn kt</th><th>ΔAngle°</th><th>ΔTack BL</th><th>ΔDist NM</th>${p?`<th>vs ${pn}</th>`:''}</tr>`;
+  for(const r of rows){ const m=r.me; if(!m){h+=`<tr><td>${r.race}</td><td colspan=7 style="color:var(--mut)">no data</td></tr>`;continue;}
+    const cell=(v,inv)=>v==null?'<td>–</td>':`<td><b class="${(inv?v<=0:v>=0)?'good':'bad'}">${v>0?'+':''}${v}</b></td>`;
+    let pv='';
+    if(p){ const d=(m.race_min!=null&&r.pr&&r.pr.race_min!=null)?Math.round((m.race_min-r.pr.race_min)*60):null;
+      pv=d==null?'<td>–</td>':`<td><b class="${d<=0?'good':'bad'}">${d<=0?'':'+'}${d}s</b></td>`; }
+    h+=`<tr><td>${r.race}</td><td>${m.rank?`P${m.rank}/${m.n_fin}`:'<span class="bad">DNF</span>'}</td>`+
+       cell(dlt(r,'sog_up',m))+cell(dlt(r,'sog_dn',m))+cell(dlt(r,'twa_up',m),true)+
+       cell(dlt(r,'tack_loss',m),true)+cell(dlt(r,'dist_nm',m),true)+pv+'</tr>'; }
+  h+='</table>'; body.insertAdjacentHTML('beforeend',h);
+
+  // 5) training priorities: how often each weakness shows up
+  const iss=[
+    ['upwind boatspeed', rows.filter(r=>dlt(r,'sog_up',r.me)<-0.05).length],
+    ['downwind boatspeed', rows.filter(r=>dlt(r,'sog_dn',r.me)<-0.05).length],
+    ['pointing (upwind angle)', rows.filter(r=>{const d=dlt(r,'twa_up',r.me);return d!=null&&d>2;}).length],
+    ['tack execution (loss)', rows.filter(r=>{const d=dlt(r,'tack_loss',r.me);return d!=null&&d>0.3;}).length],
+    ['sailing extra distance', rows.filter(r=>{const d=dlt(r,'dist_nm',r.me);return d!=null&&d>0.05;}).length],
+  ].filter(x=>x[1]>=2).sort((a,b)=>b[1]-a[1]);
+  body.insertAdjacentHTML('beforeend','<div class="sectitle">Training priorities</div>'+
+    (iss.length?`<div class="muted" style="font-size:13px;line-height:1.6"><ul style="margin:0;padding-left:18px">`+
+      iss.map(([w,c])=>`<li><b>${w}</b> — below fleet in ${c}/${N} races</li>`).join('')+'</ul></div>'
+    :'<div class="muted">No recurring weakness vs the fleet — gains are race-specific (see per-race table).</div>'));
+}
 
 // ---------- wind arrow ----------
 function setWind(deg){ $('#windVal').textContent=deg.toFixed(0)+'°';
