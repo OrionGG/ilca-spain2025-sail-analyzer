@@ -190,6 +190,11 @@ def build_race(race_dir: str, race_name: str):
             rounds.append(float(b.t[k0 + j])); k0 = k0 + j + 1
         rounds_by_sail[b.sail] = rounds
 
+    # ---- tactical inputs: wind-shadow exposure (all boats) + penalty-turn candidates ----
+    shadow = R.dirty_air(boats, grid, wind_series)
+    penalties = {b.sail: R.detect_penalty_turns(b, gun_t + 20.0, finish_t.get(b.sail, float(b.t[-1])))
+                 for b in boats}
+
     # fleet aggregate stats on the grid (FINISHERS only — exclude retirees/DNF)
     sog_grid, vmg_grid = [], []
     for b in boats:
@@ -255,6 +260,8 @@ def build_race(race_dir: str, race_name: str):
         prog = progress.get(b.sail)
         boats_out.append({
             "rounds": [None if v is None else int(round(v)) for v in rounds_by_sail.get(b.sail, [])],
+            "shadow": shadow.get(b.sail, ""),
+            "penalties": penalties.get(b.sail, []),
             "course": rnan(course_grid, 0),
             "sail": b.sail, "name": b.name, "color": PALETTE[i % len(PALETTE)],
             "t": r0(b.t), "lat": r6(b.lat), "lon": r6(b.lon),

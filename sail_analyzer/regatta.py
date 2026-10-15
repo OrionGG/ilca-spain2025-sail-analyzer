@@ -259,8 +259,78 @@ def apply_wind(b: Boat, wind_from):
     rel = wrap180(b.cog - wind_from)        # -180..180, 0 = pointing at wind
     b.twa = np.abs(rel)
     b.vmg = b.sog * np.cos(np.radians(b.twa))   # + = gaining to windward
-    b.tack = np.where(rel >= 0, 1, -1)          # +1 stbd-ish / -1 port-ish
+    # heading right of the wind => wind over the port side => +1 PORT, -1 STARBOARD
+    b.tack = np.where(rel >= 0, 1, -1)
     return b
+
+
+def dirty_air(boats, grid, wind_dir, dmax=35.0, half_angle=35.0):
+    """
+    Wind-shadow exposure on the common grid. Boat i is in dirty air at grid time
+    k when another boat j sits upwind of it: closer than `dmax` m (~8 ILCA
+    lengths) and inside a +-`half_angle` cone around the downwind direction from
+    j. Works upwind and downwind (a blanketing boat behind you is upwind too).
+    Returns {sail: str} one char per grid step: '-' not on the water, else the
+    number of boats shadowing it (capped at 9).
+    """
+    nb, ng = len(boats), len(grid)
+    X = np.full((nb, ng), np.nan); Y = np.full((nb, ng), np.nan)
+    for i, b in enumerate(boats):
+        m = (grid >= b.t[0]) & (grid <= b.t[-1])
+        X[i, m] = np.interp(grid[m], b.t, b.x)
+        Y[i, m] = np.interp(grid[m], b.t, b.y)
+    cos_a = math.cos(math.radians(half_angle))
+    out = np.full((nb, ng), -1, dtype=int)
+    for k in range(ng):
+        xs, ys = X[:, k], Y[:, k]
+        ok = ~np.isnan(xs)
+        if ok.sum() < 2:
+            continue
+        w = math.radians(float(wind_dir[k]))
+        dwx, dwy = -math.sin(w), -math.cos(w)             # downwind unit
+        dx = xs[:, None] - xs[None, :]                    # rows i = shadowed, cols j = shadowing
+        dy = ys[:, None] - ys[None, :]
+        d = np.hypot(dx, dy)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            c = (dx * dwx + dy * dwy) / d
+        sh = (d > 3.0) & (d < dmax) & (c >= cos_a) & ok[:, None] & ok[None, :]
+        cnt = sh.sum(axis=1)
+        out[ok, k] = cnt[ok]
+    return {b.sail: "".join("-" if v < 0 else str(min(int(v), 9)) for v in out[i])
+            for i, b in enumerate(boats)}
+
+
+def detect_penalty_turns(b, t0, t1):
+    """
+    Penalty-turn candidates between t0 and t1: a large NET signed rotation in a
+    short window while moving. A two-turn penalty is ~720 deg in one direction;
+    a one-turn (mark touch) ~360. Tacks/gybes alternate direction and mark
+    roundings are < ~200 deg, and GPS jitter has no net rotation, so they don't
+    trigger. Returns [{t, type, deg, dur}].
+    """
+    idx = np.where((b.t >= t0) & (b.t <= t1))[0]
+    if len(idx) < 12:
+        return []
+    t = b.t[idx]; cog = b.cog[idx]; sog = b.sog[idx]
+    d = wrap180(np.diff(cog))                              # signed per-step turn
+    cs = np.concatenate([[0.0], np.cumsum(d)])
+    out, i, n = [], 0, len(t)
+    while i < n - 2:
+        best = None
+        for win, need, kind in ((90.0, 600.0, "720"), (45.0, 300.0, "360")):
+            j = int(np.searchsorted(t, t[i] + win))
+            j = min(j, n - 1)
+            net = cs[j] - cs[i]
+            if abs(net) >= need and float(np.mean(sog[i:j + 1])) >= 1.2:
+                best = (j, kind, net); break
+        if best:
+            j, kind, net = best
+            out.append({"t": float(t[i]), "type": kind, "deg": round(float(net)),
+                        "dur": round(float(t[j] - t[i]))})
+            i = j + 1
+        else:
+            i += 1
+    return out
 
 
 # --------------------------------------------------------------------------- #
