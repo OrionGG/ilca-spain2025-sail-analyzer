@@ -166,18 +166,25 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
     # anchored there so the pre-start is excluded from the race legs.
     gun_t = (gun_from_clock(gun, float(np.median([b.t[0] for b in boats]))) if gun
              else R.detect_gun(boats, wind_from))
+    if gun:
+        first, last = float(np.median([b.t[0] for b in boats])), max(float(b.t[-1]) for b in boats)
+        if not first - 1800 <= gun_t <= last - 300:
+            hm = lambda t: datetime.fromtimestamp(t, timezone.utc).strftime("%H:%M")
+            raise AnalysisError(f"Gun {gun} UTC is outside the tracks ({hm(first)}–{hm(last)} UTC).")
     template = tuple(leg["type"] for leg in course)
     seg = {b.sail: R.segment_legs(b, wind_from, template=template, gun_t=gun_t, with_index=True)
            for b in boats}
     legs_by_sail = {s: lg for s, (lg, _) in seg.items()}
     # course leg of each boat leg = its template index (type-order fallback otherwise)
     cix_by_sail = {s: (ks if ks is not None else R.course_index(course, lg)) for s, (lg, ks) in seg.items()}
-    # a boat "finished" if it sailed the full course (>= the fleet's modal leg count);
-    # boats with fewer legs are retirees/DNF and are excluded from fleet metrics
+    # a boat "finished" if it sailed the full course (>= the fleet's modal leg count).
+    # Not by course index: a retiree's few legs get mapped onto the last course legs.
+    # Boats with fewer legs are retirees/DNF and are excluded from fleet metrics.
     _lc = {}
     for lg in legs_by_sail.values():
         _lc[len(lg)] = _lc.get(len(lg), 0) + 1
     mode_legs = max(_lc, key=_lc.get) if _lc else 0
+    finished = {s: bool(lg) and len(lg) >= mode_legs for s, lg in legs_by_sail.items()}
 
     # course marks at the fleet's actual rounding points, labelled as in the course
     marks = R.detect_marks(boats, wind_from, legs_by_sail, course, cix_by_sail)
@@ -212,7 +219,7 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
             continue
         a, c, _ = lg[-1]
         ft = float(b.t[c])
-        if Fx is not None and len(lg) >= mode_legs:   # same rule as summary["finished"]
+        if Fx is not None and finished[b.sail]:
             # search from the leg start to the END OF TRACK: the leg-end trim can
             # stop short of the line, which would otherwise bias that boat late
             proj = (b.x[a:] - Fx) * fux + (b.y[a:] - Fy) * fuy
@@ -280,7 +287,7 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
     # fleet aggregate stats on the grid (FINISHERS only — exclude retirees/DNF)
     sog_grid, vmg_grid = [], []
     for b in boats:
-        if len(legs_by_sail.get(b.sail) or []) < mode_legs:
+        if not finished[b.sail]:
             continue
         sog_grid.append(np.interp(grid, b.t, b.sog, left=np.nan, right=np.nan))
         vmg_grid.append(np.interp(grid, b.t, b.vmg, left=np.nan, right=np.nan))
@@ -310,7 +317,7 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
         gybes = [m for m in mans if m.kind == "gybe"]
         summary = {
             "n": int(fi - gi + 1),
-            "n_legs": len(legs), "finished": bool(len(legs) >= mode_legs),
+            "n_legs": len(legs), "finished": finished[b.sail],
             "race_min": round(float(finish_t.get(b.sail, b.t[fi]) - gun_t) / 60.0, 2),
             "dist_nm": round(dist_m / 1852.0, 2),
             "sog_mean": round(float(sog_s.mean()), 2),
@@ -619,6 +626,14 @@ def drop_race_cache(rid, race_id):
             os.remove(f)
 
 
+class AnalysisError(ValueError):
+    permanent = True                              # the same inputs would fail again
+
+
+class TransientError(AnalysisError):
+    permanent = False                             # e.g. a file locked by antivirus / sync
+
+
 def cache_state(rid, race):
     """("fresh" | "patch" | "error" | "stale", meta, cfg) of one race's cache."""
     cpath, mpath = race_cache_path(rid, race["id"]), _meta_path(rid, race["id"])
@@ -666,6 +681,8 @@ def analyse(race_dir, race):
     print(f"  parsing {race['name']} ...", flush=True)
     try:
         data = build_race(race_dir, race["name"], race["course"], race.get("gun"), race.get("key"))
+    except AnalysisError:
+        raise
     except (OSError, MemoryError) as e:
         raise TransientError(f"Could not read the tracks right now ({type(e).__name__}: {e}) — try again.")
     except Exception as e:
@@ -690,13 +707,17 @@ def ensure_cache(rid, rebuild=False):
     rg = find_regatta(load_registry(), rid)
     if rg is None:
         return None
-    if not rebuild and all(cache_state(rid, r)[0] in ("fresh", "error") for r in rg["races"]):
+    todo = {r["id"] for r in rg["races"]
+            if rebuild or cache_state(rid, r)[0] not in ("fresh", "error")}
+    if not todo:
         return build_index(rid, rg)               # nothing to build: don't wait for the lock
     with regatta_lock(rid):
         rg = find_regatta(load_registry(), rid)
         if rg is None:
             return None
         for race in rg["races"]:
+            if race["id"] not in todo:
+                continue
             err = build_race_cached(rid, race, force=rebuild)
             if err:
                 print(f"  ! {race['name']}: {err}", flush=True)
@@ -788,14 +809,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(idx) if idx is not None else self._err("unknown regatta", 404)
         m = re.fullmatch(r"/api/race/([a-z0-9-]+)/([a-z0-9-]+)", path)
         if m:
-            rg = find_regatta(load_registry(), m.group(1))
-            if rg is None or find_race(rg, m.group(2)) is None:
+            rid = m.group(1)
+            rg = find_regatta(load_registry(), rid)
+            race = find_race(rg, m.group(2)) if rg else None
+            if race is None:
                 return self._err("unknown race", 404)
-            return self._file(race_cache_path(m.group(1), m.group(2)), "application/json")
+            if cache_state(rid, race)[0] != "fresh":
+                with regatta_lock(rid):
+                    err = build_race_cached(rid, race)
+                if err:
+                    return self._err(err)
+            return self._file(race_cache_path(rid, race["id"]), "application/json")
         self._send(404, "not found", "text/plain")
 
     def _body(self):
         n = int(self.headers.get("Content-Length") or 0)
+        if n < 0:
+            raise ValueError("Bad Content-Length.")
         if n > 64 * 1024 * 1024:
             raise ValueError("File too large (max 64 MB).")
         return self.rfile.read(n) if n else b""
@@ -858,7 +888,12 @@ class Handler(BaseHTTPRequestHandler):
             name = clean_text(body.get("name"), 80)
             if not name:
                 raise ValueError("Give the regatta a name.")
-            edit_registry(lambda reg: find_regatta(reg, rid).update(name=name))
+            def rename(reg):
+                g = find_regatta(reg, rid)
+                if g is None:
+                    raise ValueError("unknown regatta")
+                g["name"] = name
+            edit_registry(rename)
             return self._json({"ok": True})
         with regatta_lock(rid):                   # one regatta's analyses/track swaps at a time
             return self._regatta_route(rid, parts, body)

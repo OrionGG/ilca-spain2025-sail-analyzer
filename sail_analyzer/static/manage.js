@@ -5,14 +5,6 @@
 
 const MG = { rid: null, form: null };
 
-async function api(path, body){
-  const opt = body === undefined ? {} : {method:'POST', body:JSON.stringify(body),
-    headers:{'Content-Type':'application/json', 'X-Sail-Analyzer':'1'}};   // server rejects cross-site POSTs
-  const r = await fetch(path, opt);
-  const j = await r.json().catch(() => ({ok:false, error:'HTTP '+r.status}));
-  if(!r.ok || j.ok === false) throw new Error(j.error || ('HTTP '+r.status));
-  return j;
-}
 function courseText(c){
   return (c||[]).map((l,i)=>`${l.type}→${esc(l.mark)}${l.gate?' (gate)':''}${i===c.length-1?' (finish)':''}`).join(' · ');
 }
@@ -126,11 +118,9 @@ async function uploadAll(rid, raceId, files){
   const queue = files.slice();
   const worker = async () => { while(queue.length && !err){ const file = queue.shift();
     try{
-      const r = await fetch(`/api/regatta/${rid}/race/${raceId}/file?name=${encodeURIComponent(file.name)}`, {method:'POST', body:file, headers:{'X-Sail-Analyzer':'1'}});
-      const j = await r.json().catch(()=>({ok:false,error:'HTTP '+r.status}));
-      if(!r.ok || j.ok===false) throw new Error(`${file.name}: ${j.error||r.status}`);
+      await api(`/api/regatta/${rid}/race/${raceId}/file?name=${encodeURIComponent(file.name)}`, file, {raw:true});
       mgStatus(`Uploading tracks… ${++done}/${files.length}`);
-    }catch(e){ err = err || e; } } };
+    }catch(e){ err = err || new Error(`${file.name}: ${e.message}`); } } };
   await Promise.all([worker(), worker(), worker(), worker()]);
   if(err) throw err;
 }

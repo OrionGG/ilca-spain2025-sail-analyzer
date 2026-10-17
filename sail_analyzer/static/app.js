@@ -22,6 +22,15 @@ const fmtT = s => { s = Math.max(0, s|0); return String(s/60|0).padStart(2,'0')+
 const fmtClock = ep => new Date(ep*1000).toISOString().slice(11,19)+'Z';   // HH:MM:SS UTC
 const med = a => { a = a.filter(v=>v!=null).sort((x,y)=>x-y); return a.length? a[a.length>>1] : null; };
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Server call: GET without a body, else POST (JSON, or the raw body with {raw:true}).
+// Throws the server's error message.
+async function api(path, body, opt={}){
+  const init = body===undefined ? {} : {method:'POST', body:opt.raw?body:JSON.stringify(body),
+    headers:{'X-Sail-Analyzer':'1', ...(opt.raw?{}:{'Content-Type':'application/json'})}};   // server rejects cross-site POSTs
+  const r=await fetch(path, init), j=await r.json().catch(()=>null);
+  if(!r.ok || !j || j.ok===false) throw new Error((j&&j.error)||('HTTP '+r.status));
+  return j;
+}
 function angColor(deg){ return `hsl(${deg},70%,55%)`; }
 function lerp(a,b,f){ return a+(b-a)*f; }
 
@@ -1141,7 +1150,7 @@ function debriefChecks(b){
     const win=o=>[li===0?gun:dbRoundT(o,cp),
       (finishesAt(o,ci)&&o.summary.race_min!=null)?gun+o.summary.race_min*60:dbRoundT(o,ci)];
     const PH=kind==='upwind'?(++beatNo===1?'First beat':beatNo===2?'Second beat':`Beat ${beatNo}`):
-             kind==='downwind'?(++runNo===1?'First run':`Run ${runNo}`):`Reach (leg ${li+1})`;
+             kind==='downwind'?(++runNo===1?'First run':`Run ${runNo}`):`Reach (leg ${(ci>=0?ci:li)+1})`;
     if(dPl!=null) add(PH, dPl>=3?'good':dPl<=-3?'bad':'info', 'Places on the leg',
       `P${r0} → P${r1} (${dPl>0?'+':''}${dPl}).`+
       (kind==='downwind'&&dPl>=3?' The run is the biggest chance to gain — well used.':
@@ -1335,8 +1344,7 @@ function setWind(deg){ $('#windVal').textContent=deg.toFixed(0)+'°';
 // Regattas (registry) -> races of the selected regatta (index) -> one race.
 async function fetchRegattas(){
   let j=null;
-  try{ const r=await fetch('/api/regattas'); j=await r.json().catch(()=>null);
-    if(!r.ok||!j||!Array.isArray(j.regattas)) throw new Error((j&&j.error)||('HTTP '+r.status)); }
+  try{ j=await api('/api/regattas'); if(!Array.isArray(j.regattas)) throw new Error('unexpected reply'); }
   catch(e){ setBusy('Could not read the regatta list: '+e.message); setTimeout(()=>setBusy(null),6000); return false; }
   S.regattas=j.regattas; S.templates=j.templates;
   fillRegSel(S.regatta);
@@ -1360,8 +1368,7 @@ async function loadIndex(rid, raceId){
   const tok=S._ixTok=(S._ixTok||0)+1; S._rcTok=(S._rcTok||0)+1;   // newer selections win
   setBusy('Loading races… (the first open after an update analyses the tracks, ~10–30 s)');
   let idx;
-  try{ const r=await fetch('/api/index/'+rid); idx=await r.json().catch(()=>null);
-    if(!r.ok||!Array.isArray(idx)) throw new Error((idx&&idx.error)||('HTTP '+r.status)); }
+  try{ idx=await api('/api/index/'+rid); if(!Array.isArray(idx)) throw new Error('unexpected reply'); }
   catch(e){ if(tok!==S._ixTok) return;
     setBusy('Could not load that regatta: '+e.message); setTimeout(()=>setBusy(null),5000);
     $('#regSel').value=S.regatta||''; return; }
@@ -1391,10 +1398,10 @@ function setBusy(msg){ const el=$('#busy'); if(!el) return; el.textContent=msg||
 async function loadRace(i){
   const tok=S._rcTok=(S._rcTok||0)+1;
   setPlaying(false);
-  let race=null;
-  try{ const r=await fetch('/api/race/'+S.regatta+'/'+S.index[i].id); if(r.ok) race=await r.json(); }catch(e){}
+  let race=null, why='';
+  try{ race=await api('/api/race/'+S.regatta+'/'+S.index[i].id); }catch(e){ why=e.message; }
   if(tok!==S._rcTok) return;
-  if(!race){ setBusy('Could not load that race — reopen the regatta to refresh the list.');
+  if(!race){ setBusy(`Could not load that race${why?': '+why:''} — reopen the regatta to refresh the list.`);
     setTimeout(()=>setBusy(null),5000);
     if(S.raceRid!==S.regatta){                 // shown race belongs to the previous regatta: drop it
       S.race=null; S.raceIdx=-1; S.byS={}; S.view=null; $('#raceSel').value='';
@@ -1480,7 +1487,7 @@ map.ondblclick=e=>{ if(!S.view) return; const px=e.offsetX*DPR, py=e.offsetY*DPR
   zoomAt(px,py,1.6); };
 addEventListener('resize',()=>{ if(S.race){ layout(); renderBG(); render(); S.charts.forEach(c=>c.draw()); } });
 addEventListener('keydown',e=>{ const tg=e.target;
-  if(!S.race || $('#mgModal').style.display!=='none' || tg.tagName==='TEXTAREA' ||
+  if(!S.race || $('#mgModal').style.display!=='none' || tg.tagName==='TEXTAREA' || tg.tagName==='SELECT' ||
      (tg.tagName==='INPUT' && !/^(range|checkbox|button)$/.test(tg.type))) return;
   if(e.code==='Space'){e.preventDefault();setPlaying(!S.playing);}
   if(e.code==='ArrowRight'){S.t=Math.min(S.tMax,S.t+5);syncTime();} if(e.code==='ArrowLeft'){S.t=Math.max(S.tMin,S.t-5);syncTime();} });
