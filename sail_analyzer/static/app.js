@@ -906,12 +906,7 @@ function tabPosition(body){
   body.insertAdjacentHTML('beforeend','<div class="sectitle">Position at each mark (rounding order)</div>');
   const NL=Math.max(0,...pool.map(o=>1+Math.max(-1,...boatLegs(o).map((_,li)=>courseIdx(o,li)))));
   // rounding time: mark-proximity (server 'rounds', sharp) >> leg-boundary (smoothed)
-  const roundT=(boat,ci)=>dbRoundT(boat,ci);
-  const rankAtLeg=(boat,i)=>{ const myT=roundT(boat,i); if(myT==null) return null;
-    let rk2=1;
-    for(const o of pool){ if(o===boat) continue; const oT=roundT(o,i);
-      if(oT!=null && oT<myT) rk2++; }
-    return rk2; };
+  const rankAtLeg=(boat,ci)=>dbRankAtMark(boat,ci,pool);
   const lastCols={}; for(const o of pool) if(o.summary.finished){ const c=courseIdx(o,boatLegs(o).length-1); lastCols[c]=(lastCols[c]||0)+1; }
   const finCol=Object.keys(lastCols).length?+Object.entries(lastCols).sort((a,b)=>b[1]-a[1])[0][0]:-1;
   const colLabel=i=>legMarkLabel(i)+(i===finCol&&i<courseLegs().length-1?' (finish)':'');

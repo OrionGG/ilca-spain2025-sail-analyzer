@@ -148,10 +148,12 @@ async function saveRace(){
       if(res.warning) f.warning = res.warning;
     }
     fresh = false;                             // saved: nothing to roll back from here on
-    MG.form = null;
     await loadRegattas(rid, f.id);
+    if(MG.form !== f) return;                  // the user opened another form meanwhile: keep it
+    MG.form = null;
     renderManager(`Saved “${f.name}”.`+(f.warning?` Analysis not updated: ${f.warning}`:''));
   }catch(e){
+    if(MG.form !== f) return;
     btn.disabled = false;
     if(fresh){                                 // roll back the race created by this attempt
       try{ await api(`/api/regatta/${rid}/race/${f.id}/delete`, {}); }catch(_){}

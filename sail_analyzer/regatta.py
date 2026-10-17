@@ -542,7 +542,7 @@ def segment_legs(b: Boat, wind_from, template=("U", "R", "D", "U", "D", "R"), gu
                 if a + 2 <= cmax < c:
                     legs[-1] = (a, cmax, kind)
     if len(legs) < 2:
-        legs, ks = _segment_legs_vmg(b), None
+        legs, ks = _segment_legs_vmg(b, g0), None
     return (legs, ks) if with_index else legs
 
 
@@ -593,14 +593,19 @@ def detect_finish(boats, legs_by_sail):
 
 def _split_gate(pts):
     """Gate buoys from (lat, lon, crosswind) rounding points: two buoys when the
-    cross-wind positions are clearly bimodal (gap > 80 m), else one."""
+    cross-wind positions are clearly bimodal (gap > 80 m between two groups of
+    at least 15% of the roundings each), else one."""
     if len(pts) < 6:
         gm = _med_xy([(la, lo) for la, lo, _ in pts])
         return [gm] if gm else []
     cw = np.sort(np.array([g[2] for g in pts]))
     gaps = np.diff(cw)
-    if len(gaps) and gaps.max() > 80:
-        split = cw[int(np.argmax(gaps))] + gaps.max() / 2
+    n = len(cw)
+    m = max(3, int(0.15 * n))                     # a split must leave >= m roundings each side,
+    cand = gaps[m - 1:n - m] if n >= 2 * m else gaps[:0]   # so a stray point can't decide it
+    if len(cand) and cand.max() > 80:
+        k = m - 1 + int(np.argmax(cand))
+        split = cw[k] + gaps[k] / 2
         out = []
         for grp in ([(la, lo) for la, lo, c in pts if c < split],
                     [(la, lo) for la, lo, c in pts if c >= split]):
@@ -679,14 +684,15 @@ def detect_marks(boats, wind_from, legs_by_sail, course, cix_by_sail):
     return marks
 
 
-def _segment_legs_vmg(b: Boat):
-    """Fallback: split by sign of smoothed windward VMG (upwind/downwind only)."""
-    if b.vmg is None or len(b.vmg) < 20:
+def _segment_legs_vmg(b: Boat, g0=0):
+    """Fallback: split by sign of smoothed windward VMG (upwind/downwind only),
+    from index g0 (the gun) so the pre-start isn't counted as a leg."""
+    if b.vmg is None or len(b.vmg) - g0 < 20:
         return []
     vw = _movavg(b.vmg, 21)
     sign = np.where(vw >= 0, 1, -1)
-    legs, start = [], 0
-    for i in range(1, len(sign)):
+    legs, start = [], g0
+    for i in range(g0 + 1, len(sign)):
         if sign[i] != sign[start] and (b.t[i] - b.t[start]) > 60:
             legs.append((start, i, "upwind" if sign[start] > 0 else "downwind"))
             start = i

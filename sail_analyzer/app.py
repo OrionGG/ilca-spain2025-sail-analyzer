@@ -175,19 +175,22 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
     seg = {b.sail: R.segment_legs(b, wind_from, template=template, gun_t=gun_t, with_index=True)
            for b in boats}
     legs_by_sail = {s: lg for s, (lg, _) in seg.items()}
-    # course leg of each boat leg = its template index (type-order fallback otherwise)
-    cix_by_sail = {s: (ks if ks is not None else R.course_index(course, lg)) for s, (lg, ks) in seg.items()}
     # a boat "finished" if it sailed the full course (>= the fleet's modal leg count).
-    # Not by course index: a retiree's few legs get mapped onto the last course legs.
     # Boats with fewer legs are retirees/DNF and are excluded from fleet metrics.
     _lc = {}
     for lg in legs_by_sail.values():
         _lc[len(lg)] = _lc.get(len(lg), 0) + 1
     mode_legs = max(_lc, key=_lc.get) if _lc else 0
     finished = {s: bool(lg) and len(lg) >= mode_legs for s, lg in legs_by_sail.items()}
+    # course leg of each boat leg: a finisher's DP template index; for a retiree (whose
+    # few legs the DP can stretch onto the last template legs) and for the fallback
+    # split, the n-th leg of a type = the course's n-th leg of that type
+    cix_by_sail = {s: (ks if ks is not None and finished[s] else R.course_index(course, lg))
+                   for s, (lg, ks) in seg.items()}
 
-    # course marks at the fleet's actual rounding points, labelled as in the course
-    marks = R.detect_marks(boats, wind_from, legs_by_sail, course, cix_by_sail)
+    # course marks at the finishers' actual rounding points, labelled as in the course
+    marks = R.detect_marks([b for b in boats if finished[b.sail]], wind_from, legs_by_sail,
+                           course, cix_by_sail)
 
     # ---- finish times by LINE CROSSING (not leg end, which drifts minutes) ----
     # Finish line: through the fleet-median last-turn apex, perpendicular to the
@@ -674,6 +677,17 @@ def build_race_cached(rid, race, force=False):
     return None
 
 
+def analysed(race, tracks_dir):
+    """(data, cfg): analysis of a race config on a folder of tracks + the hash of those tracks."""
+    cfg = race_cfg_hash({**race, "dir": tracks_dir})
+    return analyse(tracks_dir, race), cfg
+
+
+def save_analysed(rid, race, data, cfg):
+    put_race(rid, race["id"], race)
+    store_race_cache(rid, race, data, cfg)
+
+
 def analyse(race_dir, race):
     """Run the analysis for a race config on a folder of tracks; AnalysisError if it fails."""
     if not list_kml(race_dir):
@@ -933,10 +947,8 @@ class Handler(BaseHTTPRequestHandler):
             if new["course"] != race["course"]:
                 new["key"] = new_key(rid, race["id"])    # old hand-edited marks don't fit
             if new["course"] != race["course"] or new["gun"] != race.get("gun"):
-                cfg = race_cfg_hash(new)
-                data = analyse(race_dir_abs(new), new)   # raises -> nothing saved
-                put_race(rid, race["id"], new)
-                store_race_cache(rid, new, data, cfg)
+                data, cfg = analysed(new, race_dir_abs(new))   # raises -> nothing saved
+                save_analysed(rid, new, data, cfg)
                 return self._json({"ok": True})
             put_race(rid, race["id"], new)        # name only: saved; patch an existing analysis
             err = build_race_cached(rid, new) if os.path.exists(race_cache_path(rid, race["id"])) else None
@@ -954,8 +966,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("No uploaded .kml files to use.")
             new = {**race, **(race_fields(body, race) if "course" in body else {})}
             new["key"] = new_key(rid, race["id"])  # new tracks: old hand-edited marks don't apply
-            cfg = race_cfg_hash({**new, "dir": st})   # the set analysed (a late upload changes it)
-            data = analyse(st, new)               # raises -> the current tracks stay
+            data, cfg = analysed(new, st)         # raises -> the current tracks stay
             d = upload_dir_for(rid, race["id"])
             old = f"{d}.old-{uuid.uuid4().hex[:6]}"   # fresh name: a stuck leftover can't collide
             if os.path.isdir(d):
@@ -968,8 +979,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise
             shutil.rmtree(old, ignore_errors=True)
             new["dir"] = rel_dir(d)
-            put_race(rid, race["id"], new)
-            store_race_cache(rid, new, data, cfg)  # moved files keep name/size/mtime
+            save_analysed(rid, new, data, cfg)    # moved files keep name/size/mtime
             return self._json({"ok": True})
         if action == "delete":
             put_race(rid, race["id"], None)
