@@ -660,8 +660,7 @@ def detect_marks(boats, wind_from, legs_by_sail, course, cix_by_sail=None):
             wins[L].append((b, a, nxt))
 
     def closest_pass(ll):
-        mlat, mlon = 111320.0, 111320.0 * math.cos(math.radians(ll[0]))
-        d = [float(np.min(np.hypot((b.lon[i0:i1 + 1] - ll[1]) * mlon, (b.lat[i0:i1 + 1] - ll[0]) * mlat)))
+        d = [float(np.min(np.hypot(*to_xy(b.lat[i0:i1 + 1], b.lon[i0:i1 + 1], ll[0], ll[1])[:2])))
              for b, i0, i1 in wins[L] if i1 > i0]
         return float(np.median(d)) if d else float("inf")
 

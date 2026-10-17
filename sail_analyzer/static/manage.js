@@ -17,6 +17,7 @@ function courseText(c){
   return (c||[]).map((l,i)=>`${l.type}→${esc(l.mark)}${l.gate?' (gate)':''}${i===c.length-1?' (finish)':''}`).join(' · ');
 }
 function mgRegatta(){ return S.regattas.find(g=>g.id===MG.rid); }
+function viewedRaceId(){ return S.index&&S.index[S.raceIdx]?S.index[S.raceIdx].id:undefined; }
 
 function openManager(){
   MG.rid = S.regatta || (S.regattas[0]&&S.regattas[0].id) || null;
@@ -153,12 +154,13 @@ async function saveRace(){
       await api(`${base}/commit`, payload);
     } else {                                   // course/gun change is analysed before it's saved
       mgStatus('Analysing… (10–30 s for a big fleet)');
-      await api(`${base}/update`, payload);
+      const res = await api(`${base}/update`, payload);
+      if(res.warning) f.warning = res.warning;
     }
     fresh = false;                             // saved: nothing to roll back from here on
     MG.form = null;
     await loadRegattas(rid, f.id);
-    renderManager(`Saved “${f.name}”.`);
+    renderManager(`Saved “${f.name}”.`+(f.warning?` Analysis not updated: ${f.warning}`:''));
   }catch(e){
     btn.disabled = false;
     if(fresh){                                 // roll back the race created by this attempt
@@ -179,21 +181,25 @@ async function newRegatta(){
 }
 async function renameRegatta(){
   const g = mgRegatta(), name = prompt('New name:', g.name); if(!name||!name.trim()) return;
-  try{ await api(`/api/regatta/${g.id}/rename`, {name}); await loadRegattas(S.regatta); renderManager(); }
+  try{ await api(`/api/regatta/${g.id}/rename`, {name}); await fetchRegattas();
+    if(S.regatta===g.id){ $('#regTitle').textContent=name.trim(); document.title='Sail Analyzer — '+name.trim(); }
+    renderManager(); }
   catch(e){ mgStatus('Error: '+e.message); }
 }
 async function deleteRegatta(){
   const g = mgRegatta();
   if(!confirm(`Delete regatta “${g.name}” and its ${g.races.length} race(s)?\nUploaded track copies and caches are removed; your original folders are not touched.`)) return;
   try{ await api(`/api/regatta/${g.id}/delete`, {}); MG.rid = null;
-    await loadRegattas(S.regatta===g.id?null:S.regatta); MG.rid = S.regatta||(S.regattas[0]&&S.regattas[0].id)||null; renderManager(); }
+    if(S.regatta===g.id) await loadRegattas(null); else await fetchRegattas();
+    MG.rid = S.regatta||(S.regattas[0]&&S.regattas[0].id)||null; renderManager(); }
   catch(e){ mgStatus('Error: '+e.message); }
 }
 async function deleteRace(raceId){
   const g = mgRegatta(), r = g.races.find(x=>x.id===raceId);
   if(!confirm(`Delete race “${r.name}”?\n${r.uploaded?'Its uploaded track copies are removed.':'Your original folder is not touched.'}`)) return;
   try{ await api(`/api/regatta/${g.id}/race/${raceId}/delete`, {});
-    if(S.regatta===g.id) await loadRegattas(g.id); else await refreshRegattas();
+    if(S.regatta===g.id) await loadRegattas(g.id, viewedRaceId()===raceId?undefined:viewedRaceId());
+    else await refreshRegattas();
     MG.form = null; renderManager(`Deleted “${r.name}”.`); }
   catch(e){ mgStatus('Error: '+e.message); }
 }

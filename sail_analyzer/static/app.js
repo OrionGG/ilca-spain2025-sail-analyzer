@@ -186,11 +186,11 @@ function boatCourse(b){ return b._mcourse||b.course; }
 // Per leg index, pick the boat that did that leg in least time; stitch its real
 // track. So the ideal = best demonstrated path+speed each leg, not a straight line.
 function legBest(){
-  const nl=boatLegs(focusB()).length, best=[];
-  for(let i=0;i<nl;i++){ let bt=Infinity,bb=null;
-    for(const o of finishers()){ const lg=boatLegs(o); if(i>=lg.length) continue;   // ignore retirees
-      const [a,c]=lg[i], tm=o.t[c]-o.t[a]; if(tm>0 && tm<bt){ bt=tm; bb={sail:o.sail,a,c,t:tm}; } }
-    best.push(bb); }
+  const f=focusB(), best=[];
+  boatLegs(f).forEach((_,li)=>{ const ci=courseIdx(f,li); let bt=Infinity,bb=null;
+    for(const o of finishers()){ const lj=ciMap(o)[ci]; if(lj==null) continue;     // same course leg
+      const [a,c]=boatLegs(o)[lj], tm=o.t[c]-o.t[a]; if(tm>0 && tm<bt){ bt=tm; bb={sail:o.sail,a,c,t:tm}; } }
+    best.push(bb); });
   return best;
 }
 function idealRoute(){ const wps=[];
@@ -1247,7 +1247,7 @@ function debriefChecks(b){
           const same=near.filter(o=>GO.get(o)===gi).length, other=near.length-same;
           const wv2=windVecs(tB), q=g=>{ const [x,y]=toXY(g[0],g[1]); return x*wv2.l[0]+y*wv2.l[1]; };
           const side=q(G[gi])>q(G[1-gi])?'right':'left';
-          const nr0=dbRankAtMark(b,ci,pl), nr1=(li+1===legs.length-1)?dbFinishRank(b,pl):dbRankAtMark(b,courseIdx(b,li+1),pl);
+          const cn=courseIdx(b,li+1), nr0=dbRankAtMark(b,ci,pl), nr1=finishesAt(b,cn)?dbFinishRank(b,pl):dbRankAtMark(b,cn,pl);
           const nd=(nr0!=null&&nr1!=null)?nr0-nr1:null, v=same>other+2?'warn':'good';
           add(PH,v,'Gate choice',`Rounded the <b>${side}</b> gate mark (looking upwind) with ${plur(same,'boat')} within ±25 s; ${other} at the other one `+
             `(fleet split ${Math.round(share*100)}/${Math.round((1-share)*100)}). `+(nd!=null?`Next leg: ${nd>0?'+':''}${nd} places. `:'')+
