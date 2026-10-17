@@ -1331,11 +1331,17 @@ async function loadRegattas(rid, raceId){
   await loadIndex(rid, raceId);
 }
 async function loadIndex(rid, raceId){
+  setBusy('Loading races…');
+  let idx;
+  try{ const r=await fetch('/api/index/'+rid); idx=await r.json().catch(()=>null);
+    if(!r.ok||!Array.isArray(idx)) throw new Error((idx&&idx.error)||('HTTP '+r.status)); }
+  catch(e){ setBusy('Could not load that regatta: '+e.message); setTimeout(()=>setBusy(null),5000);
+    $('#regSel').value=S.regatta||''; return; }
+  setBusy(null);
   S.regatta=rid; try{ localStorage.setItem('sa_regatta',rid); }catch(e){}
   const g=S.regattas.find(x=>x.id===rid);
   $('#regTitle').textContent=g?g.name:''; document.title='Sail Analyzer — '+(g?g.name:'');
-  setBusy('Analysing races…');
-  try{ S.index=await (await fetch('/api/index/'+rid)).json(); } finally { setBusy(null); }
+  S.index=idx;
   const rs=$('#raceSel'); rs.innerHTML='';
   S.index.forEach(r=>{ const o=document.createElement('option'); o.value=r.i;
     o.textContent=r.race+'  ·  wind '+r.wind_from+'°'; rs.appendChild(o); });
@@ -1433,7 +1439,9 @@ map.ondblclick=e=>{ if(!S.view) return; const px=e.offsetX*DPR, py=e.offsetY*DPR
     if(n.i>=0 && n.d<18*DPR){ effMarks().splice(n.i,1); saveMarks(); afterMarksChanged(); } return; }
   zoomAt(px,py,1.6); };
 addEventListener('resize',()=>{ if(S.race){ layout(); renderBG(); render(); S.charts.forEach(c=>c.draw()); } });
-addEventListener('keydown',e=>{ if(!S.race||/INPUT|SELECT|TEXTAREA/.test(document.activeElement&&document.activeElement.tagName||'')) return;
+addEventListener('keydown',e=>{ const tg=e.target;
+  if(!S.race || $('#mgModal').style.display!=='none' || tg.tagName==='TEXTAREA' ||
+     (tg.tagName==='INPUT' && !/^(range|checkbox|button)$/.test(tg.type))) return;
   if(e.code==='Space'){e.preventDefault();setPlaying(!S.playing);}
   if(e.code==='ArrowRight'){S.t=Math.min(S.tMax,S.t+5);syncTime();} if(e.code==='ArrowLeft'){S.t=Math.max(S.tMin,S.t-5);syncTime();} });
 

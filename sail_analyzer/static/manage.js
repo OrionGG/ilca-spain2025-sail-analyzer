@@ -82,7 +82,7 @@ function renderForm(){
     <label>Name <input id="mgName" value="${esc(f.name)}" maxlength="60"></label>
     <label>${f.mode==='add'?'Tracks folder':'Replace tracks (optional)'}
       <input type="file" id="mgDir" webkitdirectory directory multiple>
-      <span class="muted" id="mgDirInfo">${f.files.length?`${f.files.length} .kml files${f.folder?' in '+esc(f.folder):''}`:(f.mode==='add'?'choose the folder with the race\'s .kml files':'keep current tracks')}</span></label>
+      <span class="muted" id="mgDirInfo">${f.dirError?`<span class="bad">${esc(f.dirError)}</span>`:f.files.length?`${f.files.length} .kml files${f.folder?' in '+esc(f.folder):''}`:(f.mode==='add'?'choose the folder with the race\'s .kml files':'keep current tracks')}</span></label>
     <label>Course <select id="mgTpl"><option value="">— start from a template —</option>${opts}</select></label>
     <table class="mgt"><tr><th>#</th><th>Leg</th><th>Ends at mark</th><th>Gate</th><th></th></tr>${rows}</table>
     <div style="margin:6px 0"><button class="btn" id="mgAddLeg">+ Add leg</button>
@@ -96,7 +96,10 @@ function renderForm(){
   $('#mgDir').onchange = e => {
     const all = [...e.target.files].filter(x=>/\.kml$/i.test(x.name));
     const top = all.filter(x=>(x.webkitRelativePath||x.name).split('/').length<=2);
-    f.files = top.length ? top : all;
+    const use = top.length ? top : all, seen = new Set();
+    const dup = use.some(x=>{ const k = x.name.toLowerCase(); if(seen.has(k)) return true; seen.add(k); return false; });
+    f.dirError = dup ? 'This folder has same-named .kml files in different subfolders — choose the race\'s own folder.' : '';
+    f.files = dup ? [] : use;
     f.folder = f.files.length ? (f.files[0].webkitRelativePath||'').split('/')[0] : '';
     if(f.mode==='add' && f.folder && /^Race \d+$/.test(f.name)) f.name = f.folder.replace(/^\d+[_ -]+/,'');
     sync(); renderForm(); };
@@ -115,37 +118,49 @@ function renderForm(){
 
 function mgStatus(t){ const m = $('#mgMsg'); if(m) m.textContent = t; }
 
+// Upload with 4 parallel workers; after the first failure no new file starts and
+// the error is raised only once every in-flight upload has finished.
+async function uploadAll(rid, raceId, files){
+  let done = 0, err = null;
+  const queue = files.slice();
+  const worker = async () => { while(queue.length && !err){ const file = queue.shift();
+    try{
+      const r = await fetch(`/api/regatta/${rid}/race/${raceId}/file?name=${encodeURIComponent(file.name)}`, {method:'POST', body:file});
+      const j = await r.json().catch(()=>({ok:false,error:'HTTP '+r.status}));
+      if(!r.ok || j.ok===false) throw new Error(`${file.name}: ${j.error||r.status}`);
+      mgStatus(`Uploading tracks… ${++done}/${files.length}`);
+    }catch(e){ err = err || e; } } };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  if(err) throw err;
+}
+
+// New tracks go to a staging folder first; the race's course/gun/name are saved and
+// its tracks replaced only after every file uploaded, so a failure changes nothing.
 async function saveRace(){
   const f = MG.form, rid = MG.rid, btn = $('#mgSave');
   if(f.mode==='add' && !f.files.length) return mgStatus('Choose the folder with the race\'s .kml files.');
   if(f.course.some(l=>!l.mark)) return mgStatus('Every leg needs the mark it ends at.');
   btn.disabled = true;
-  let raceId = f.id;
   try{
     const payload = {name:f.name, course:f.course.map((l,i)=>({...l, gate:i<f.course.length-1&&!!l.gate})), gun:f.gun};
-    if(f.mode==='add') raceId = (await api(`/api/regatta/${rid}/races`, payload)).id;
-    else await api(`/api/regatta/${rid}/race/${raceId}/update`, payload);
+    let fresh = false;
+    if(f.mode==='add'){ f.id = (await api(`/api/regatta/${rid}/races`, payload)).id; f.mode = 'edit'; fresh = true; }
+    const base = `/api/regatta/${rid}/race/${f.id}`;
     if(f.files.length){
-      if(f.mode==='edit') await api(`/api/regatta/${rid}/race/${raceId}/clear`, {});
-      let done = 0;
-      const queue = f.files.slice();
-      const worker = async () => { while(queue.length){ const file = queue.shift();
-        const r = await fetch(`/api/regatta/${rid}/race/${raceId}/file?name=${encodeURIComponent(file.name)}`, {method:'POST', body:file});
-        const j = await r.json().catch(()=>({ok:false,error:'HTTP '+r.status}));
-        if(!r.ok || j.ok===false) throw new Error(`${file.name}: ${j.error||r.status}`);
-        mgStatus(`Uploading tracks… ${++done}/${f.files.length}`); } };
-      await Promise.all([worker(), worker(), worker(), worker()]);
+      await api(`${base}/stage`, {});
+      await uploadAll(rid, f.id, f.files);
     }
+    if(!fresh) await api(`${base}/update`, payload);
+    if(f.files.length) await api(`${base}/commit`, {});
     mgStatus('Analysing… (10–30 s for a big fleet)');
-    await api(`/api/regatta/${rid}/race/${raceId}/build`, {});
+    await api(`${base}/build`, {});
     MG.form = null;
-    await loadRegattas(rid, raceId);
+    await loadRegattas(rid, f.id);
     renderManager(`Saved “${f.name}”.`);
   }catch(e){
     btn.disabled = false;
-    if(f.mode==='add' && raceId){ f.mode='edit'; f.id=raceId; }   // race exists now: retry edits/uploads it
     await refreshRegattas();
-    mgStatus('Error: '+e.message);
+    mgStatus('Error: '+e.message+(f.mode==='edit'?' — fix it and save again.':''));
   }
 }
 async function refreshRegattas(){ const j = await (await fetch('/api/regattas')).json(); S.regattas = j.regattas; S.templates = j.templates; }
