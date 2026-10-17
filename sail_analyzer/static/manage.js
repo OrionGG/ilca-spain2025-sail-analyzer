@@ -4,7 +4,6 @@
 // marks, from a template or custom) and an optional gun time.
 
 const MG = { rid: null, form: null };
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 async function api(path, body){
   const opt = body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)};
@@ -134,16 +133,16 @@ async function uploadAll(rid, raceId, files){
   if(err) throw err;
 }
 
-// New tracks go to a staging folder first; the race's course/gun/name are saved and
-// its tracks replaced only after every file uploaded, so a failure changes nothing.
+// New tracks go to a staging folder first; an edited race's course/gun/name and tracks
+// change only after every file uploaded, and a failed add removes the new race again.
 async function saveRace(){
   const f = MG.form, rid = MG.rid, btn = $('#mgSave');
   if(f.mode==='add' && !f.files.length) return mgStatus('Choose the folder with the race\'s .kml files.');
   if(f.course.some(l=>!l.mark)) return mgStatus('Every leg needs the mark it ends at.');
   btn.disabled = true;
+  let fresh = false;
   try{
     const payload = {name:f.name, course:f.course.map((l,i)=>({...l, gate:i<f.course.length-1&&!!l.gate})), gun:f.gun};
-    let fresh = false;
     if(f.mode==='add'){ f.id = (await api(`/api/regatta/${rid}/races`, payload)).id; f.mode = 'edit'; fresh = true; }
     const base = `/api/regatta/${rid}/race/${f.id}`;
     if(f.files.length){
@@ -159,11 +158,15 @@ async function saveRace(){
     renderManager(`Saved “${f.name}”.`);
   }catch(e){
     btn.disabled = false;
+    if(fresh){                                 // roll back the race created by this attempt
+      try{ await api(`/api/regatta/${rid}/race/${f.id}/delete`, {}); }catch(_){}
+      f.mode = 'add'; delete f.id;
+    }
     await refreshRegattas();
-    mgStatus('Error: '+e.message+(f.mode==='edit'?' — fix it and save again.':''));
+    mgStatus('Error: '+e.message+' — fix it and save again.');
   }
 }
-async function refreshRegattas(){ const j = await (await fetch('/api/regattas')).json(); S.regattas = j.regattas; S.templates = j.templates; }
+const refreshRegattas = fetchRegattas;
 
 async function newRegatta(){
   const name = prompt('Regatta name (e.g. "Europa Cup Hyères 2026"):'); if(!name||!name.trim()) return;

@@ -21,6 +21,7 @@ let DPR = Math.min(devicePixelRatio || 1, 2);
 const fmtT = s => { s = Math.max(0, s|0); return String(s/60|0).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); };
 const fmtClock = ep => new Date(ep*1000).toISOString().slice(11,19)+'Z';   // HH:MM:SS UTC
 const med = a => { a = a.filter(v=>v!=null).sort((x,y)=>x-y); return a.length? a[a.length>>1] : null; };
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function angColor(deg){ return `hsl(${deg},70%,55%)`; }
 function lerp(a,b,f){ return a+(b-a)*f; }
 
@@ -904,7 +905,7 @@ function tabPosition(body){
     for(const o of pool){ if(o===boat) continue; const oT=roundT(o,i);
       if(oT!=null && oT<myT) rk2++; }
     return rk2; };
-  let mt=`<table><tr><th>Boat</th>${Array.from({length:NL},(_,i)=>`<th>${legMarkLabel(i)}</th>`).join('')}</tr>`;
+  let mt=`<table><tr><th>Boat</th>${Array.from({length:NL},(_,i)=>`<th>${esc(legMarkLabel(i))}</th>`).join('')}</tr>`;
   const rowFor=(boat,color)=>{ let prev=null, tds='';
     for(let i=0;i<NL;i++){ const rk2=rankAtLeg(boat,i);
       const d=(rk2!=null&&prev!=null)?rk2-prev:null; if(rk2!=null)prev=rk2;
@@ -980,12 +981,12 @@ function tabRegatta(body){
   // 4) per-race table
   body.insertAdjacentHTML('beforeend','<div class="sectitle">Per race</div>');
   let h=`<table><tr><th>Race</th><th>Place</th><th>ΔUp kt</th><th>ΔDn kt</th><th>ΔAngle°</th><th>ΔTack BL</th><th>ΔDist NM</th>${p?`<th>vs ${pn}</th>`:''}</tr>`;
-  for(const r of rows){ const m=r.me; if(!m){h+=`<tr><td>${r.race}</td><td colspan=7 style="color:var(--mut)">no data</td></tr>`;continue;}
+  for(const r of rows){ const m=r.me; if(!m){h+=`<tr><td>${esc(r.race)}</td><td colspan=7 style="color:var(--mut)">no data</td></tr>`;continue;}
     const cell=(v,inv)=>v==null?'<td>–</td>':`<td><b class="${(inv?v<=0:v>=0)?'good':'bad'}">${v>0?'+':''}${v}</b></td>`;
     let pv='';
     if(p){ const d=(m.race_min!=null&&r.pr&&r.pr.race_min!=null)?Math.round((m.race_min-r.pr.race_min)*60):null;
       pv=d==null?'<td>–</td>':`<td><b class="${d<=0?'good':'bad'}">${d<=0?'':'+'}${d}s</b></td>`; }
-    h+=`<tr><td>${r.race}</td><td>${m.rank?`P${m.rank}/${m.n_fin}`:'<span class="bad">DNF</span>'}</td>`+
+    h+=`<tr><td>${esc(r.race)}</td><td>${m.rank?`P${m.rank}/${m.n_fin}`:'<span class="bad">DNF</span>'}</td>`+
        cell(dlt(r,'sog_up',m))+cell(dlt(r,'sog_dn',m))+cell(dlt(r,'twa_up',m),true)+
        cell(dlt(r,'tack_loss',m),true)+cell(dlt(r,'dist_nm',m),true)+pv+'</tr>'; }
   h+='</table>'; body.insertAdjacentHTML('beforeend',h);
@@ -1212,7 +1213,7 @@ function debriefChecks(b){
         if(onPort&&late>0&&traffic>=3){ v='warn'; txt+=' Avoid the port-layline pile: come in on starboard a little early rather than tacking into the queue\'s wind shadow.'; }
         if(over!=null&&over>=12){ v='warn'; txt+=` Overstood: sailed ~${over.toFixed(0)}° freer than close-hauled into the mark (extra distance).`; }
         const cl=courseLegs()[li];
-        add(PH,v,`Approach to ${!cl?'the mark':cl.gate?'the gate':'mark '+cl.mark}`,txt,tB-40, v==='warn'?1:0);
+        add(PH,v,`Approach to ${!cl?'the mark':cl.gate?'the gate':'mark '+esc(cl.mark)}`,txt,tB-40, v==='warn'?1:0);
       }
     }
     if(kind==='downwind'){
@@ -1318,15 +1319,22 @@ function setWind(deg){ $('#windVal').textContent=deg.toFixed(0)+'°';
 
 // ---------- load ----------
 // Regattas (registry) -> races of the selected regatta (index) -> one race.
-async function loadRegattas(rid, raceId){
+async function fetchRegattas(){
   const j=await (await fetch('/api/regattas')).json();
   S.regattas=j.regattas; S.templates=j.templates;
-  let keep=null; try{ keep=localStorage.getItem('sa_regatta'); }catch(e){}
-  rid=rid||S.regatta||keep;
-  if(!S.regattas.some(g=>g.id===rid)) rid=S.regattas.length?S.regattas[0].id:null;
+  fillRegSel(S.regatta);
+}
+function fillRegSel(rid){
   const gs=$('#regSel'); gs.innerHTML='';
   S.regattas.forEach(g=>{ const o=document.createElement('option'); o.value=g.id; o.textContent=g.name; gs.appendChild(o); });
   gs.value=rid||''; gs.onchange=()=>loadIndex(gs.value);
+}
+async function loadRegattas(rid, raceId){
+  await fetchRegattas();
+  let keep=null; try{ keep=localStorage.getItem('sa_regatta'); }catch(e){}
+  rid=rid||S.regatta||keep;
+  if(!S.regattas.some(g=>g.id===rid)) rid=S.regattas.length?S.regattas[0].id:null;
+  fillRegSel(rid);
   if(!rid){ S.regatta=null; showEmpty(); if(typeof openManager==='function') openManager(); return; }
   await loadIndex(rid, raceId);
 }
