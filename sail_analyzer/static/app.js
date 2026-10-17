@@ -1032,9 +1032,16 @@ function windVecs(t){ const w=windAtT(t)*Math.PI/180;           // u = upwind, l
 function countIn(arr,t0,t1,kind){ return (arr||[]).filter(m=>m.t>=t0&&m.t<=t1&&(!kind||m.kind===kind)).length; }
 function trackMean(b,t0,t1,f){ const i0=idxAt(b,t0), i1=idxAt(b,t1); let s=0,n=0;
   for(let i=i0;i<=i1;i++){ const v=f(i); if(v!=null&&isFinite(v)){ s+=v; n++; } } return n?s/n:null; }
-function markForRound(i){ const leg=courseLegs()[i]; return leg?markBy(leg.mark):[]; }
+// Course leg for a boat's leg li: its n-th leg of a type is the course's n-th leg of
+// that type (as on the server), so a dropped leg doesn't shift later marks.
+function courseIdx(b,li){ const lg=boatLegs(b), c=courseLegs(); if(!lg[li]) return -1;
+  const kind=lg[li][2], T={upwind:'U',reach:'R',downwind:'D'}[kind];
+  let n=0; for(let j=0;j<li;j++) if(lg[j][2]===kind) n++;
+  for(let ci=0;ci<c.length;ci++) if(c[ci].type===T && n--===0) return ci;
+  return -1; }
+function markForRound(b,i){ const leg=courseLegs()[courseIdx(b,i)]; return leg?markBy(leg.mark):[]; }
 // seconds spent inside the R-metre zone around the mark rounded at the end of leg i
-function roundingZone(o,i,R=50){ const t=dbRoundT(o,i); if(t==null) return null; const mk=markForRound(i); if(!mk.length) return null;
+function roundingZone(o,i,R=50){ const t=dbRoundT(o,i); if(t==null) return null; const mk=markForRound(o,i); if(!mk.length) return null;
   const d=j=>Math.min(...mk.map(m=>distM(o.lat[j],o.lon[j],m[0],m[1])));
   const j0=idxAt(o,t); if(d(j0)>R) return null; let a=j0,c=j0;
   while(a>0&&d(a-1)<R&&o.t[j0]-o.t[a-1]<120) a--;
@@ -1212,7 +1219,7 @@ function debriefChecks(b){
         let v='good', txt=`Approached on <b>${onPort?'port':'starboard'}</b>${late?`, tacked ${late}× in the last 40 s`:''}; ${traffic} boat${traffic!==1?'s':''} rounding within ±20 s.`;
         if(onPort&&late>0&&traffic>=3){ v='warn'; txt+=' Avoid the port-layline pile: come in on starboard a little early rather than tacking into the queue\'s wind shadow.'; }
         if(over!=null&&over>=12){ v='warn'; txt+=` Overstood: sailed ~${over.toFixed(0)}° freer than close-hauled into the mark (extra distance).`; }
-        const cl=courseLegs()[li];
+        const cl=courseLegs()[courseIdx(b,li)];
         add(PH,v,`Approach to ${!cl?'the mark':cl.gate?'the gate':'mark '+esc(cl.mark)}`,txt,tB-40, v==='warn'?1:0);
       }
     }
@@ -1220,7 +1227,7 @@ function debriefChecks(b){
       const gyl=o=>{ const [x0,x1]=win(o); return x0!=null&&x1!=null?countIn(o.maneuvers,x0,x1,'gybe'):null; };
       const myG=gyl(b), fG=medN(pl.map(gyl));
       add(PH,'info','Gybes',`${plur(myG,'gybe')} (fleet median ${fG??'–'}).`, tA);
-      const cl=courseLegs()[li], G=cl&&cl.gate?markBy(cl.mark):[];
+      const cl=courseLegs()[courseIdx(b,li)], G=cl&&cl.gate?markBy(cl.mark):[];
       if(G.length===2&&!isLast){
         const gateOf=o=>{ const t=dbRoundT(o,li); if(t==null) return null; const bd=[1e9,1e9];
           for(let i=idxAt(o,t-30);i<=idxAt(o,t+30);i++) for(const g of [0,1]) bd[g]=Math.min(bd[g],distM(o.lat[i],o.lon[i],G[g][0],G[g][1]));
@@ -1339,7 +1346,7 @@ async function loadRegattas(rid, raceId){
   await loadIndex(rid, raceId);
 }
 async function loadIndex(rid, raceId){
-  setBusy('Loading races…');
+  setBusy('Loading races… (the first open after an update analyses the tracks, ~10–30 s)');
   let idx;
   try{ const r=await fetch('/api/index/'+rid); idx=await r.json().catch(()=>null);
     if(!r.ok||!Array.isArray(idx)) throw new Error((idx&&idx.error)||('HTTP '+r.status)); }

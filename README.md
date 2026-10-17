@@ -33,8 +33,9 @@ cd ilca-spain2025-sail-analyzer
 python sail_analyzer/app.py
 ```
 
-The first launch parses the 441 KML files once (~20 s) and caches the result, then your
-browser opens automatically at **http://127.0.0.1:8765**. Later launches are instant.
+Your browser opens automatically at **http://127.0.0.1:8765**. The first time a regatta is
+opened its KML files are parsed once (~20 s for the 441 bundled tracks) and cached; later
+opens are instant.
 
 > **Windows shortcut:** instead of the command line, just double-click
 > **`Run Sail Analyzer.bat`** in the project root.

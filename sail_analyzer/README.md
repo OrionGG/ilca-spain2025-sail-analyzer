@@ -11,7 +11,7 @@ A local, offline web app that does Vantage / SailViewer–style race analysis on
 **Or from a terminal:**
 ```
 cd sail_analyzer
-python app.py            # parses 441 KMLs once (~20s), caches, opens the browser
+python app.py            # opens the browser; a regatta is parsed + cached on first open (~20s)
 ```
 Then go to http://127.0.0.1:8765/ . Requires Python 3 + numpy (already installed).
 No internet, no map tiles, no other dependencies.

@@ -96,8 +96,8 @@ def list_kml(d):
 
 
 def clean_text(s, n=80):
-    """Names shown in the UI come from users/filenames: drop HTML-special chars."""
-    return re.sub(r"[<>&\"'`]", "", str(s or "")).strip()[:n]
+    """Names shown in the UI come from users/filenames: drop markup characters."""
+    return re.sub(r"[<>\"`\x00-\x1f]", "", str(s or "")).strip()[:n]
 
 
 def gun_from_clock(clock: str, t0: float):
@@ -150,7 +150,8 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
     # The gun is a round clock-minute ~5 min after logging starts (logging begins
     # at the warning signal; the first minutes are the pre-start). Leg 1 is
     # anchored there so the pre-start is excluded from the race legs.
-    gun_t = gun_from_clock(gun, min(b.t[0] for b in boats)) if gun else R.detect_gun(boats, wind_from)
+    gun_t = (gun_from_clock(gun, float(np.median([b.t[0] for b in boats]))) if gun
+             else R.detect_gun(boats, wind_from))
     template = tuple(leg["type"] for leg in course)
     legs_by_sail = {b.sail: R.segment_legs(b, wind_from, template=template, gun_t=gun_t) for b in boats}
     # a boat "finished" if it sailed the full course (>= the fleet's modal leg count);
@@ -231,13 +232,23 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
     for m in marks:
         _mk.setdefault(m["label"], []).append(_ll_xy(m["ll"]))
     seq_xy = [_mk.get(leg["mark"], []) for leg in course]           # targets per leg end
+    # a boat's n-th leg of a type ends at the course's n-th leg of that type, so a
+    # dropped/extra leg in one track doesn't shift its later roundings
+    course_ix, seen = {}, {}
+    for ci, leg in enumerate(course):
+        course_ix[(leg["type"], seen.get(leg["type"], 0))] = ci
+        seen[leg["type"]] = seen.get(leg["type"], 0) + 1
+    kind_type = {"upwind": "U", "reach": "R", "downwind": "D"}
     rounds_by_sail = {}
     for b in boats:
         lg = legs_by_sail[b.sail]
         gi0 = int(np.argmin(np.abs(b.t - gun_t)))
-        rounds, k0 = [], gi0
+        rounds, k0, cnt = [], gi0, {}
         for li in range(len(lg)):
-            tgts = seq_xy[li] if li < len(seq_xy) else []
+            typ = kind_type.get(lg[li][2])
+            ci = course_ix.get((typ, cnt.get(typ, 0)))
+            cnt[typ] = cnt.get(typ, 0) + 1
+            tgts = seq_xy[ci] if ci is not None else []
             if not tgts or k0 >= len(b.t) - 2:
                 rounds.append(None); continue
             dist = np.min(np.stack([np.hypot(b.x[k0:] - tx, b.y[k0:] - ty)
@@ -414,15 +425,22 @@ def save_registry(reg):
 
 
 def _write_registry(reg):
-    tmp = REG_PATH + ".tmp"
+    atomic_write(REG_PATH, json.dumps(reg, indent=1, ensure_ascii=False))
+
+
+def atomic_write(path, text):
+    """Write via a temp file + rename so readers never see a half-written file."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.{threading.get_ident()}.tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(reg, fh, indent=1, ensure_ascii=False)
-    for attempt in range(20):                     # Windows: another process may be reading it
+        fh.write(text)
+    for attempt in range(20):                     # Windows: a reader may hold the target open
         try:
-            os.replace(tmp, REG_PATH)
+            os.replace(tmp, path)
             return
         except PermissionError:
             if attempt == 19:
+                os.remove(tmp)
                 raise
             threading.Event().wait(0.05)
 
@@ -529,9 +547,14 @@ def _read_json(path):
 
 
 def _write_json(path, obj, compact=False):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(obj, fh, separators=(",", ":") if compact else None)
+    atomic_write(path, json.dumps(obj, separators=(",", ":") if compact else None))
+
+
+def store_race_cache(rid, race, data):
+    _write_json(race_cache_path(rid, race["id"]), data, compact=True)
+    _write_json(_meta_path(rid, race["id"]), {"cfg": race_cfg_hash(race), "name": race["name"],
+                                              "key": race.get("key"),
+                                              "entry": index_entry(0, race["id"], data)})
 
 
 def drop_race_cache(rid, race_id):
@@ -570,9 +593,7 @@ def build_race_cached(rid, race, force=False):
     if data is None:
         drop_race_cache(rid, race["id"])
         return "No usable tracks: expected TracTrac KML files (timestamped points, 30+ fixes per boat)."
-    _write_json(cpath, data, compact=True)
-    _write_json(mpath, {"cfg": h, "name": race["name"], "key": race.get("key"),
-                        "entry": index_entry(0, race["id"], data)})
+    store_race_cache(rid, race, data)
     return None
 
 
@@ -677,10 +698,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(registry_view())
         m = re.fullmatch(r"/api/index/([a-z0-9-]+)", path)
         if m:
-            ip = os.path.join(CACHE_DIR, m.group(1), "index.json")
-            if os.path.exists(ip):                # kept current by startup + build/update/delete
-                return self._file(ip, "application/json")
-            idx = ensure_cache(m.group(1))
+            idx = ensure_cache(m.group(1))        # stat-only when nothing changed
             return self._json(idx) if idx is not None else self._err("unknown regatta", 404)
         m = re.fullmatch(r"/api/race/([a-z0-9-]+)/([a-z0-9-]+)", path)
         if m:
@@ -693,9 +711,22 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("File too large (max 64 MB).")
         return self.rfile.read(n) if n else b""
 
+    def _same_origin(self):
+        """Block cross-site requests (CSRF / DNS rebinding): local Host and Origin,
+        plus a custom header that a foreign page can't send without a preflight."""
+        local = ("127.0.0.1", "localhost")
+        if urlparse("//" + (self.headers.get("Host") or "")).hostname not in local:
+            return False
+        origin = self.headers.get("Origin")
+        if origin and urlparse(origin).hostname not in local:
+            return False
+        return self.headers.get("X-Sail-Analyzer") == "1"
+
     def do_POST(self):
         u = urlparse(self.path)
         parts = [p for p in u.path.split("/") if p]
+        if not self._same_origin():
+            return self._err("forbidden", 403)
         try:
             raw = self._body()
             if parts[:2] != ["api", "regatta"] and parts != ["api", "regattas"]:
@@ -744,14 +775,14 @@ class Handler(BaseHTTPRequestHandler):
             k = max([rg.get("seq", 0), len(rg["races"])] + [_race_num(r["id"]) for r in rg["races"]]) + 1
             while f"r{k:02d}" in {r["id"] for r in rg["races"]}:
                 k += 1
+            course, gun = normalize_course(body.get("course")), normalize_gun(body.get("gun"))
             rg["seq"] = k
             race_id = f"r{k:02d}"
             d = upload_dir_for(rid, race_id)
             os.makedirs(d, exist_ok=True)
             rg["races"].append({"id": race_id, "name": name,
                                 "dir": os.path.relpath(d, HERE).replace("\\", "/"),
-                                "course": normalize_course(body.get("course")),
-                                "gun": normalize_gun(body.get("gun")), "key": new_key(rid, race_id)})
+                                "course": course, "gun": gun, "key": new_key(rid, race_id)})
             save_registry(reg)
             return self._json({"ok": True, "id": race_id})
         race = find_race(rg, parts[4]) if len(parts) > 5 and parts[3] == "race" else None
@@ -772,20 +803,36 @@ class Handler(BaseHTTPRequestHandler):
             shutil.rmtree(st, ignore_errors=True)
             os.makedirs(st, exist_ok=True)
             return self._json({"ok": True})
-        if action == "commit":                    # staged uploads replace the race's tracks
+        if action == "commit":                    # analyse the staged tracks, then swap them in
             st = staging_dir_for(rid, race["id"])
-            staged = list_kml(st)
-            if not staged:
+            if not list_kml(st):
                 raise ValueError("No uploaded .kml files to use.")
+            new = dict(race)
+            if "course" in body:
+                new["course"] = normalize_course(body.get("course"))
+                new["gun"] = normalize_gun(body.get("gun"))
+                new["name"] = clean_text(body.get("name", race["name"]), 60) or race["name"]
+            new["key"] = new_key(rid, race["id"])  # new tracks: old hand-edited marks don't apply
+            try:
+                data = build_race(st, new["name"], new["course"], new.get("gun"), new["key"])
+            except Exception as e:
+                raise ValueError(f"Analysis failed: {type(e).__name__}: {e}")
+            if data is None:
+                raise ValueError("No usable tracks: expected TracTrac KML files "
+                                 "(timestamped points, 30+ fixes per boat).")
             d = upload_dir_for(rid, race["id"])
             os.makedirs(d, exist_ok=True)
             for f in list_kml(d):
                 os.remove(f)                      # only the app's own uploaded copies
-            for f in staged:
+            for f in list_kml(st):
                 os.replace(f, os.path.join(d, os.path.basename(f)))
             shutil.rmtree(st, ignore_errors=True)
-            race["dir"] = os.path.relpath(d, HERE).replace("\\", "/")
+            new["dir"] = os.path.relpath(d, HERE).replace("\\", "/")
+            race.clear()
+            race.update(new)
             save_registry(reg)
+            store_race_cache(rid, race, data)
+            write_index(rid)
             return self._json({"ok": True})
         if action == "build":
             err = build_race_cached(rid, race, force=False)
@@ -808,7 +855,10 @@ class Handler(BaseHTTPRequestHandler):
     def _upload(self, parts, name, raw):
         if len(parts) != 6 or parts[3] != "race":
             return self._err("not found", 404)
-        name = clean_text(os.path.basename(name.replace("\\", "/")), 120)
+        name = os.path.basename(name.replace("\\", "/"))
+        if len(name) > 200:
+            raise ValueError("File name too long (max 200 characters).")
+        name = clean_text(name, 255)
         if not name.lower().endswith(".kml") or name.startswith("."):
             raise ValueError(f"Not a .kml file: {name}")
         if b"<kml" not in raw[:2000].lower() and b"<placemark" not in raw[:20000].lower():
@@ -847,10 +897,13 @@ def main():
 
     reg = load_registry()
     print(f"Regattas    : {', '.join(g['name'] for g in reg['regattas']) or '(none yet)'}")
-    print("Building analysis cache (first run parses the KML files; ~10-20 s per regatta)...")
-    for rg in reg["regattas"]:
-        idx = ensure_cache(rg["id"], rebuild=rebuild)
-        print(f"Ready: {rg['name']} — {len(idx or [])} races cached.")
+    if rebuild:
+        print("Rebuilding the analysis cache of every regatta...")
+        for rg in reg["regattas"]:
+            idx = ensure_cache(rg["id"], rebuild=True)
+            print(f"Ready: {rg['name']} — {len(idx or [])} races cached.")
+    else:
+        print("Races are analysed when a regatta is first opened (~10-20 s after an update).")
 
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}/"

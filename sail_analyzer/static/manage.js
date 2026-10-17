@@ -6,7 +6,8 @@
 const MG = { rid: null, form: null };
 
 async function api(path, body){
-  const opt = body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)};
+  const opt = body === undefined ? {} : {method:'POST', body:JSON.stringify(body),
+    headers:{'Content-Type':'application/json', 'X-Sail-Analyzer':'1'}};   // server rejects cross-site POSTs
   const r = await fetch(path, opt);
   const j = await r.json().catch(() => ({ok:false, error:'HTTP '+r.status}));
   if(!r.ok || j.ok === false) throw new Error(j.error || ('HTTP '+r.status));
@@ -124,7 +125,7 @@ async function uploadAll(rid, raceId, files){
   const queue = files.slice();
   const worker = async () => { while(queue.length && !err){ const file = queue.shift();
     try{
-      const r = await fetch(`/api/regatta/${rid}/race/${raceId}/file?name=${encodeURIComponent(file.name)}`, {method:'POST', body:file});
+      const r = await fetch(`/api/regatta/${rid}/race/${raceId}/file?name=${encodeURIComponent(file.name)}`, {method:'POST', body:file, headers:{'X-Sail-Analyzer':'1'}});
       const j = await r.json().catch(()=>({ok:false,error:'HTTP '+r.status}));
       if(!r.ok || j.ok===false) throw new Error(`${file.name}: ${j.error||r.status}`);
       mgStatus(`Uploading tracks… ${++done}/${files.length}`);
@@ -133,8 +134,8 @@ async function uploadAll(rid, raceId, files){
   if(err) throw err;
 }
 
-// New tracks go to a staging folder first; an edited race's course/gun/name and tracks
-// change only after every file uploaded, and a failed add removes the new race again.
+// New tracks go to a staging folder and are analysed there; the race's tracks, course,
+// gun and name change only if that succeeds, and a failed add removes the new race again.
 async function saveRace(){
   const f = MG.form, rid = MG.rid, btn = $('#mgSave');
   if(f.mode==='add' && !f.files.length) return mgStatus('Choose the folder with the race\'s .kml files.');
@@ -145,14 +146,17 @@ async function saveRace(){
     const payload = {name:f.name, course:f.course.map((l,i)=>({...l, gate:i<f.course.length-1&&!!l.gate})), gun:f.gun};
     if(f.mode==='add'){ f.id = (await api(`/api/regatta/${rid}/races`, payload)).id; f.mode = 'edit'; fresh = true; }
     const base = `/api/regatta/${rid}/race/${f.id}`;
-    if(f.files.length){
+    if(f.files.length){                        // new tracks: analysed first, swapped in only if good
       await api(`${base}/stage`, {});
       await uploadAll(rid, f.id, f.files);
+      mgStatus('Analysing… (10–30 s for a big fleet)');
+      await api(`${base}/commit`, payload);
+    } else {
+      await api(`${base}/update`, payload);
+      mgStatus('Analysing… (10–30 s for a big fleet)');
+      await api(`${base}/build`, {});
     }
-    if(!fresh) await api(`${base}/update`, payload);
-    if(f.files.length) await api(`${base}/commit`, {});
-    mgStatus('Analysing… (10–30 s for a big fleet)');
-    await api(`${base}/build`, {});
+    fresh = false;                             // saved: nothing to roll back from here on
     MG.form = null;
     await loadRegattas(rid, f.id);
     renderManager(`Saved “${f.name}”.`);
