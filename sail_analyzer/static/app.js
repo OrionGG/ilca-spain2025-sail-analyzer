@@ -505,7 +505,7 @@ function buildLegBar(){
   const COL={upwind:'#4aa3ff',reach:'#6edc8c',downwind:'#ff7b54'};
   let h='<span>Leg:</span>'+`<span class="lp ${S.legFilter==='all'?'on':''}" data-leg="all">All</span>`;
   boatLegs(focusB()).forEach((lg,i)=>{ h+=`<span class="lp ${S.legFilter===i?'on':''}" data-leg="${i}"
-    style="border-left:3px solid ${COL[lg[2]]}" title="${lg[2]}">${i+1}</span>`; });
+    style="border-left:3px solid ${COL[lg[2]]}" title="${lg[2]}">${legNo(focusB(),i)}</span>`; });
   bar.innerHTML=h;
   bar.querySelectorAll('.lp').forEach(p=>p.onclick=()=>{
     S.legFilter = p.dataset.leg==='all' ? 'all' : +p.dataset.leg; setTab(S.tab); });
@@ -660,7 +660,7 @@ function tabSpeed(body){
   let t='<table><tr><th>Leg</th><th>Type</th><th>Avg SOG</th><th>Avg VMG</th></tr>';
   boatLegs(f).forEach(([a,c,k],i)=>{ let ss=0,vv=0,n=0; for(let j=a;j<=c;j++){ss+=f.sog[j];vv+=f.vmg[j];n++;}
     const sel=S.legFilter===i?' style="background:var(--panel2)"':'';
-    t+=`<tr class="man" data-leg="${i}"${sel}><td>${i+1}</td><td>${k}</td><td>${(ss/n).toFixed(2)} kt</td><td>${(Math.abs(vv/n)).toFixed(2)} kt</td></tr>`; });
+    t+=`<tr class="man" data-leg="${i}"${sel}><td>${legNo(f,i)}</td><td>${k}</td><td>${(ss/n).toFixed(2)} kt</td><td>${(Math.abs(vv/n)).toFixed(2)} kt</td></tr>`; });
   t+='</table>'; body.insertAdjacentHTML('beforeend',t);
   body.querySelectorAll('tr[data-leg]').forEach(tr=>tr.onclick=()=>{
     const i=+tr.dataset.leg; S.legFilter = (S.legFilter===i?'all':i); setTab('speed'); });
@@ -1049,6 +1049,8 @@ function trackMean(b,t0,t1,f){ const i0=idxAt(b,t0), i1=idxAt(b,t1); let s=0,n=0
 // legs re-derived from hand-placed marks follow the course one to one).
 function courseIdx(b,li){ if(b._mlegs) return li; const cx=b.course_ix; if(!cx) return li;
   return cx[li]==null?-1:cx[li]; }
+// leg number shown to the user: the course leg (as in Key findings / Position)
+function legNo(b,li){ const ci=courseIdx(b,li); return (ci>=0?ci:li)+1; }
 function markForRound(ci){ const leg=courseLegs()[ci]; return leg?markBy(leg.mark):[]; }
 // seconds spent inside the R-metre zone around the mark of course leg ci
 function roundingZone(o,ci,R=50){ const t=dbRoundT(o,ci); if(t==null) return null; const mk=markForRound(ci); if(!mk.length) return null;

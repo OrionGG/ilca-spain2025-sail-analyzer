@@ -83,7 +83,7 @@ function renderForm(){
       a moved mark gets a new label (2a / 2b). Shortened races are detected automatically.</span></div>
     <label>Gun time <input id="mgGun" value="${esc(f.gun)}" placeholder="auto" size="9">
       <span class="muted">UTC, HH:MM:SS — leave empty to auto-detect (assumes tracking starts ~5 min before the gun)</span></label>
-    <div style="margin-top:10px"><button class="btn primary" id="mgSave">${f.mode==='add'?'Add & analyse':'Save & re-analyse'}</button>
+    <div style="margin-top:10px"><button class="btn primary" id="mgSave" ${f.saving?'disabled':''}>${f.mode==='add'?'Add & analyse':'Save & re-analyse'}</button>
       <button class="btn" id="mgCancel">Cancel</button></div></div>`;
   const sync = () => { f.name = $('#mgName').value; f.gun = $('#mgGun').value; };
   $('#mgDir').onchange = e => {
@@ -128,10 +128,11 @@ async function uploadAll(rid, raceId, files){
 // New tracks go to a staging folder and are analysed there; the race's tracks, course,
 // gun and name change only if that succeeds, and a failed add removes the new race again.
 async function saveRace(){
-  const f = MG.form, rid = MG.rid, btn = $('#mgSave');
+  const f = MG.form, rid = MG.rid;
+  if(f.saving) return;
   if(f.mode==='add' && !f.files.length) return mgStatus('Choose the folder with the race\'s .kml files.');
   if(f.course.some(l=>!l.mark)) return mgStatus('Every leg needs the mark it ends at.');
-  btn.disabled = true;
+  f.saving = true; $('#mgSave').disabled = true;
   let fresh = false;
   try{
     const payload = {name:f.name, course:f.course.map((l,i)=>({...l, gate:i<f.course.length-1&&!!l.gate})), gun:f.gun};
@@ -149,16 +150,18 @@ async function saveRace(){
     }
     fresh = false;                             // saved: nothing to roll back from here on
     await loadRegattas(rid, f.id);
+    f.saving = false;
     if(MG.form !== f) return;                  // the user opened another form meanwhile: keep it
     MG.form = null;
     renderManager(`Saved “${f.name}”.`+(f.warning?` Analysis not updated: ${f.warning}`:''));
   }catch(e){
-    if(MG.form !== f) return;
-    btn.disabled = false;
     if(fresh){                                 // roll back the race created by this attempt
       try{ await api(`/api/regatta/${rid}/race/${f.id}/delete`, {}); }catch(_){}
       f.mode = 'add'; delete f.id;
     }
+    f.saving = false;
+    if(MG.form !== f){ await fetchRegattas(); return; }
+    $('#mgSave').disabled = false;
     await fetchRegattas();
     mgStatus('Error: '+e.message+' — fix it and save again.');
   }

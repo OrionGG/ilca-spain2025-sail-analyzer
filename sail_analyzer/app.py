@@ -181,7 +181,8 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
     for lg in legs_by_sail.values():
         _lc[len(lg)] = _lc.get(len(lg), 0) + 1
     mode_legs = max(_lc, key=_lc.get) if _lc else 0
-    finished = {s: bool(lg) and len(lg) >= mode_legs for s, lg in legs_by_sail.items()}
+    finished = {s: bool(lg) and ks is not None and len(lg) >= mode_legs   # fallback split: no course fit
+                for s, (lg, ks) in seg.items()}
     # course leg of each boat leg: a finisher's DP template index; for a retiree (whose
     # few legs the DP can stretch onto the last template legs) and for the fallback
     # split, the n-th leg of a type = the course's n-th leg of that type
@@ -637,15 +638,25 @@ class TransientError(AnalysisError):
     permanent = False                             # e.g. a file locked by antivirus / sync
 
 
+def _mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:                               # removed meanwhile (e.g. a race deleted)
+        return None
+
+
 def cache_state(rid, race):
     """("fresh" | "patch" | "error" | "stale", meta, cfg) of one race's cache."""
     cpath, mpath = race_cache_path(rid, race["id"]), _meta_path(rid, race["id"])
-    h = race_cfg_hash(race)
+    try:
+        h = race_cfg_hash(race)
+    except OSError:                               # a track vanished while hashing
+        return "stale", None, None
     meta = _read_json(mpath)
     if meta and meta.get("cfg") == h:
-        if meta.get("error") and os.path.getmtime(mpath) >= SRC_MTIME:
+        if meta.get("error") and (_mtime(mpath) or 0) >= SRC_MTIME:
             return "error", meta, h               # same inputs failed before: don't re-parse
-        if os.path.exists(cpath) and os.path.getmtime(cpath) >= SRC_MTIME:
+        if (_mtime(cpath) or 0) >= SRC_MTIME:
             stale_label = meta.get("name") != race["name"] or meta.get("key") != race.get("key")
             return ("patch" if stale_label or "entry" not in meta else "fresh"), meta, h
     return "stale", meta, h
@@ -691,7 +702,7 @@ def save_analysed(rid, race, data, cfg):
 def analyse(race_dir, race):
     """Run the analysis for a race config on a folder of tracks; AnalysisError if it fails."""
     if not list_kml(race_dir):
-        raise AnalysisError(f"No .kml files in {race_dir}")
+        raise AnalysisError("No .kml files in this race's folder — choose its tracks folder.")
     print(f"  parsing {race['name']} ...", flush=True)
     try:
         data = build_race(race_dir, race["name"], race["course"], race.get("gun"), race.get("key"))
@@ -829,7 +840,11 @@ class Handler(BaseHTTPRequestHandler):
             if race is None:
                 return self._err("unknown race", 404)
             if cache_state(rid, race)[0] != "fresh":
-                with regatta_lock(rid):
+                with regatta_lock(rid):           # re-read: the race may have changed meanwhile
+                    rg = find_regatta(load_registry(), rid)
+                    race = find_race(rg, race["id"]) if rg else None
+                    if race is None:
+                        return self._err("unknown race", 404)
                     err = build_race_cached(rid, race)
                 if err:
                     return self._err(err)
@@ -946,7 +961,7 @@ class Handler(BaseHTTPRequestHandler):
             new = {**race, **race_fields(body, race)}
             if new["course"] != race["course"]:
                 new["key"] = new_key(rid, race["id"])    # old hand-edited marks don't fit
-            if new["course"] != race["course"] or new["gun"] != race.get("gun"):
+            if (new["course"] != race["course"] or new["gun"] != race.get("gun")) and kml_files(new):
                 data, cfg = analysed(new, race_dir_abs(new))   # raises -> nothing saved
                 save_analysed(rid, new, data, cfg)
                 return self._json({"ok": True})
@@ -977,9 +992,15 @@ class Handler(BaseHTTPRequestHandler):
                 if os.path.isdir(old):
                     os.replace(old, d)
                 raise
-            shutil.rmtree(old, ignore_errors=True)
             new["dir"] = rel_dir(d)
-            save_analysed(rid, new, data, cfg)    # moved files keep name/size/mtime
+            try:
+                save_analysed(rid, new, data, cfg)    # moved files keep name/size/mtime
+            except Exception:
+                os.replace(d, st)                 # undo: new set back to staging, old set back
+                if os.path.isdir(old):
+                    os.replace(old, d)
+                raise
+            shutil.rmtree(old, ignore_errors=True)
             return self._json({"ok": True})
         if action == "delete":
             put_race(rid, race["id"], None)
