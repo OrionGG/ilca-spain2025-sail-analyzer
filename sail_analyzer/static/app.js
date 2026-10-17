@@ -952,7 +952,7 @@ function tabRegatta(body){
   const idx=S.index||[], p=partnerB(), pn=p?p.name.slice(0,10):null;
   const rows=idx.map(r=>({x:r.i+1, race:r.race, fl:r.fleet||{}, me:(r.boats||{})[S.focus]||null,
                           pr:p?((r.boats||{})[S.partner]||null):null}));
-  if(!rows.length || !rows.some(r=>r.me)){ body.insertAdjacentHTML('beforeend','<div class="muted">No regatta summary — restart the server to rebuild the index.</div>'); return; }
+  if(!rows.length || !rows.some(r=>r.me)){ body.insertAdjacentHTML('beforeend','<div class="muted">No regatta summary yet — reopen the regatta (top bar) to analyse its races.</div>'); return; }
   const N=rows.length, fmtX=t=>'R'+Math.round(t);
   const opt={xmin:0.5, xmax:N+0.5, fmtX};
   const dser=(get,color,w)=>({color,w:w||2,data:rows.map(r=>[r.x,get(r)])});
@@ -1392,8 +1392,13 @@ async function loadRace(i){
   try{ const r=await fetch('/api/race/'+S.regatta+'/'+S.index[i].id); if(r.ok) race=await r.json(); }catch(e){}
   if(tok!==S._rcTok) return;
   if(!race){ setBusy('Could not load that race — reopen the regatta to refresh the list.');
-    setTimeout(()=>setBusy(null),5000); $('#raceSel').value=S.raceIdx; return; }
-  S.raceIdx=i; S.race=race;
+    setTimeout(()=>setBusy(null),5000);
+    if(S.raceRid!==S.regatta){                 // shown race belongs to the previous regatta: drop it
+      S.race=null; S.raceIdx=-1; S.byS={}; S.view=null; $('#raceSel').value='';
+      renderBG(); render(); setTab(S.tab);
+    } else $('#raceSel').value=S.raceIdx;
+    return; }
+  S.raceIdx=i; S.race=race; S.raceRid=S.regatta;
   $('#raceSel').value=i;
   S._marks=null;                       // reload marks (auto or saved override) per race
   S.legFilter='all';                   // reset leg drill-down for the new race

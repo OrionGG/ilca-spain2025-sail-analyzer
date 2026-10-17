@@ -544,8 +544,16 @@ def normalize_course(course):
 
 def race_fields(body, race):
     """Validated name / course / gun from a request body."""
-    return {"course": normalize_course(body.get("course")), "gun": normalize_gun(body.get("gun")),
-            "name": clean_text(body.get("name", race["name"]), 60) or race["name"]}
+    course, gun = course_and_gun(body)
+    return {"course": course, "gun": gun, "name": clean_text(body.get("name", race["name"]), 60) or race["name"]}
+
+
+def course_and_gun(body):
+    course, gun = normalize_course(body.get("course")), normalize_gun(body.get("gun"))
+    if course[0]["type"] != "U" and not gun:
+        raise ValueError("This course doesn't start upwind: enter the gun time "
+                         "(auto-detection looks for the fleet starting to beat).")
+    return course, gun
 
 
 def normalize_gun(gun):
@@ -566,8 +574,8 @@ def normalize_gun(gun):
 # --------------------------------------------------------------------------- #
 # Cache: cache/<regatta>/<race>.json (+ .meta.json), cache/<regatta>/index.json
 # --------------------------------------------------------------------------- #
-def _src_mtime():
-    return max(os.path.getmtime(os.path.join(HERE, f)) for f in ("regatta.py", "app.py"))
+# caches older than the code this process runs are rebuilt
+SRC_MTIME = max(os.path.getmtime(os.path.join(HERE, f)) for f in ("regatta.py", "app.py"))
 
 
 def race_cfg_hash(race):
@@ -618,19 +626,17 @@ def build_race_cached(rid, race, force=False):
     h = race_cfg_hash(race)
     meta = _read_json(mpath)
     if not force and meta and meta.get("cfg") == h and meta.get("error") \
-            and os.path.getmtime(mpath) >= _src_mtime():
+            and os.path.getmtime(mpath) >= SRC_MTIME:
         return meta["error"]                      # same inputs failed before: don't re-parse
     if not force and meta and meta.get("cfg") == h and os.path.exists(cpath) \
-            and os.path.getmtime(cpath) >= _src_mtime():
+            and os.path.getmtime(cpath) >= SRC_MTIME:
         if meta.get("name") != race["name"] or meta.get("key") != race.get("key") or "entry" not in meta:
             data = _read_json(cpath)              # rename / new marks key: patch, no re-parse
             if data is None:
                 drop_race_cache(rid, race["id"])
                 return build_race_cached(rid, race, force=True)
             data["race"], data["key"] = race["name"], race.get("key") or race["name"]
-            _write_json(cpath, data, compact=True)
-            _write_json(mpath, {"cfg": h, "name": race["name"], "key": race.get("key"),
-                                "entry": index_entry(0, race["id"], data)})
+            store_race_cache(rid, race, data, h)
         return None
     try:
         data = analyse(race_dir_abs(race), race)
@@ -682,6 +688,8 @@ def build_index(rid):
 
 def ensure_cache(rid, rebuild=False):
     """Build missing/stale races of one regatta and return its index."""
+    if find_regatta(load_registry(), rid) is None:
+        return None
     with regatta_lock(rid):
         rg = find_regatta(load_registry(), rid)
         if rg is None:
@@ -778,6 +786,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(idx) if idx is not None else self._err("unknown regatta", 404)
         m = re.fullmatch(r"/api/race/([a-z0-9-]+)/([a-z0-9-]+)", path)
         if m:
+            rg = find_regatta(load_registry(), m.group(1))
+            if rg is None or find_race(rg, m.group(2)) is None:
+                return self._err("unknown race", 404)
             return self._file(race_cache_path(m.group(1), m.group(2)), "application/json")
         self._send(404, "not found", "text/plain")
 
@@ -827,9 +838,13 @@ class Handler(BaseHTTPRequestHandler):
             if not name:
                 raise ValueError("Give the regatta a name.")
 
+            def taken(reg, rid):              # registered, or leftovers of a deleted one
+                return find_regatta(reg, rid) or os.path.exists(os.path.join(UPLOAD_DIR, rid)) \
+                    or os.path.exists(os.path.join(CACHE_DIR, rid))
+
             def add(reg):
                 rid, k = _slug(name), 2
-                while find_regatta(reg, rid):
+                while taken(reg, rid):
                     rid, k = f"{_slug(name)}-{k}", k + 1
                 reg["regattas"].append({"id": rid, "name": name, "races": []})
                 return rid
@@ -854,9 +869,11 @@ class Handler(BaseHTTPRequestHandler):
             edit_registry(lambda reg: reg.update(regattas=[g for g in reg["regattas"] if g["id"] != rid]))
             for d in (os.path.join(UPLOAD_DIR, rid), os.path.join(CACHE_DIR, rid)):
                 shutil.rmtree(d, ignore_errors=True)       # app-made copies/caches only
+            with _RLOCKS_GUARD:
+                _RLOCKS.pop(rid, None)
             return self._json({"ok": True})
         if parts[3:] == ["races"]:                                         # create race
-            course, gun = normalize_course(body.get("course")), normalize_gun(body.get("gun"))
+            course, gun = course_and_gun(body)
 
             def add(reg):
                 g = find_regatta(reg, rid)
@@ -904,8 +921,7 @@ class Handler(BaseHTTPRequestHandler):
             new["key"] = new_key(rid, race["id"])  # new tracks: old hand-edited marks don't apply
             data = analyse(st, new)               # raises -> the current tracks stay
             d = upload_dir_for(rid, race["id"])
-            old = d + ".old"
-            shutil.rmtree(old, ignore_errors=True)
+            old = f"{d}.old-{uuid.uuid4().hex[:6]}"   # fresh name: a stuck leftover can't collide
             if os.path.isdir(d):
                 os.replace(d, old)                # whole-folder swap: never half-replaced
             try:
@@ -919,12 +935,6 @@ class Handler(BaseHTTPRequestHandler):
             put_race(rid, race["id"], new)
             store_race_cache(rid, new, data, race_cfg_hash(new))   # moved files: same size/mtime
             return self._json({"ok": True})
-        if action == "build":
-            err = build_race_cached(rid, race, force=False)
-            idx = build_index(rid)                # a failed race drops out of the index
-            if err:
-                return self._err(err)
-            return self._json({"ok": True, "n_races": len(idx or [])})
         if action == "delete":
             put_race(rid, race["id"], None)
             if is_upload_dir(race_dir_abs(race)):

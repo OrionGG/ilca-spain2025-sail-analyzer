@@ -189,7 +189,7 @@ async function renameRegatta(){
 async function deleteRegatta(){
   const g = mgRegatta();
   if(!confirm(`Delete regatta “${g.name}” and its ${g.races.length} race(s)?\nUploaded track copies and caches are removed; your original folders are not touched.`)) return;
-  try{ await api(`/api/regatta/${g.id}/delete`, {}); MG.rid = null;
+  try{ await api(`/api/regatta/${g.id}/delete`, {}); MG.rid = null; MG.form = null;   // the form belonged to it
     if(S.regatta===g.id) await loadRegattas(null); else await fetchRegattas();
     MG.rid = S.regatta||(S.regattas[0]&&S.regattas[0].id)||null; renderManager(); }
   catch(e){ mgStatus('Error: '+e.message); }
