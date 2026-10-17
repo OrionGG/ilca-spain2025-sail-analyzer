@@ -540,6 +540,23 @@ def segment_legs(b: Boat, wind_from, template=("U", "R", "D", "U", "D", "R"), gu
     return legs if len(legs) >= 2 else _segment_legs_vmg(b)
 
 
+def course_index(course, legs):
+    """Course leg index for each of a boat's legs: its n-th leg of a type ends at
+    the course's n-th leg of that type, so a dropped or extra leg in one track
+    doesn't shift its later legs (None where the course has no such leg)."""
+    pos, seen = {}, {}
+    for ci, leg in enumerate(course):
+        pos[(leg["type"], seen.get(leg["type"], 0))] = ci
+        seen[leg["type"]] = seen.get(leg["type"], 0) + 1
+    letter = {_KIND[m]: t for t, m in _MODE.items()}
+    out, cnt = [], {}
+    for (_a, _c, kind) in legs:
+        t = letter.get(kind)
+        out.append(pos.get((t, cnt.get(t, 0))))
+        cnt[t] = cnt.get(t, 0) + 1
+    return out
+
+
 def _med_xy(pts):
     if len(pts) < 3:
         return None
@@ -595,9 +612,8 @@ def detect_marks(boats, wind_from, legs_by_sail, course):
     race's course definition: a list of legs {"type": U|R|D, "mark": label,
     "gate": bool}, each ending at its mark; the last leg ends at the finish.
 
-    Course leg i of type T is matched to each boat's n-th leg of that type (n =
-    its order among the course's T legs), so a dropped or extra leg in one track
-    doesn't shift the others. Candidate rounding points per boat: the
+    Each boat's legs are matched to the course with `course_index`, so a dropped
+    or extra leg in one track doesn't shift the others. Candidate rounding points per boat: the
     furthest-upwind point of a beat / furthest-downwind point of a run, and the
     turn apex at the leg end. Per mark the candidate the fleet's tracks pass
     closest to wins (beats into the top mark favour the furthest-upwind point,
@@ -610,11 +626,6 @@ def detect_marks(boats, wind_from, legs_by_sail, course):
     lx, ly = uy, -ux                                  # cross-wind (along line)
     K = len(course)
     fin_label = course[-1]["mark"] if K else "F"
-    kind_of = {"U": "upwind", "R": "reach", "D": "downwind"}
-    occ, seen = [], {}
-    for leg in course:
-        occ.append(seen.get(leg["type"], 0))
-        seen[leg["type"]] = occ[-1] + 1
     gate, order = {}, []
     for leg in course[:-1]:
         L = leg["mark"]
@@ -627,17 +638,12 @@ def detect_marks(boats, wind_from, legs_by_sail, course):
         legs = legs_by_sail.get(b.sail) or []
         if b.x is None or not legs:
             continue
-        by_kind = {}
-        for li, lg in enumerate(legs):
-            by_kind.setdefault(lg[2], []).append(li)
         p = b.x * ux + b.y * uy
-        for i, leg in enumerate(course[:-1]):
-            lis = by_kind.get(kind_of[leg["type"]], [])
-            if occ[i] >= len(lis):
+        for li, ci in enumerate(course_index(course, legs)):
+            if ci is None or ci >= K - 1:             # unmatched leg / the finish leg
                 continue
-            li = lis[occ[i]]
             a, c, _ = legs[li]
-            L, T = leg["mark"], leg["type"]
+            L, T = course[ci]["mark"], course[ci]["type"]
             if T in ("U", "D"):
                 j = a + int(np.argmax(p[a:c + 1]) if T == "U" else np.argmin(p[a:c + 1]))
                 cand[L]["ext"].append((b.lat[j], b.lon[j], float(b.x[j] * lx + b.y[j] * ly)))

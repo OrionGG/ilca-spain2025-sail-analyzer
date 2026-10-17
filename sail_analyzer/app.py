@@ -112,21 +112,28 @@ def gun_from_clock(clock: str, t0: float):
 
 
 def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
-    files = list_kml(race_dir)
-    boats = []
-    for f in files:
+    tracks = []
+    for f in list_kml(race_dir):
         base = clean_text(os.path.basename(f)[:-4], 120)
-        sail = base.split("-")[0]
-        disp = base.split("_", 1)[-1] if "_" in base else base
         try:
             t, la, lo = R.parse_kml(f)
         except Exception as e:                    # truncated / not-KML file: skip that boat
             print(f"  ! skipping {os.path.basename(f)}: {e}", flush=True)
             continue
-        if len(t) < 30:
-            continue
-        b = R.Boat(sail=sail, name=disp, file=f, t=t, lat=la, lon=lo)
-        boats.append(b)
+        if len(t) >= 30:
+            tracks.append((f, base, t, la, lo))
+    # boat id = sail number (TracTrac "206341-O_NAME"); when that isn't unique in
+    # this folder (other naming schemes) the whole file name is the id
+    first = [base.split("-")[0] for _, base, *_ in tracks]
+    boats, used = [], set()
+    for (f, base, t, la, lo), sail in zip(tracks, first):
+        sid = sail if first.count(sail) == 1 else base
+        k = 2
+        while sid in used:
+            sid, k = f"{base}~{k}", k + 1
+        used.add(sid)
+        disp = base.split("_", 1)[-1] if "_" in base else base
+        boats.append(R.Boat(sail=sid, name=disp, file=f, t=t, lat=la, lon=lo))
     if not boats:
         return None
 
@@ -232,22 +239,14 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
     for m in marks:
         _mk.setdefault(m["label"], []).append(_ll_xy(m["ll"]))
     seq_xy = [_mk.get(leg["mark"], []) for leg in course]           # targets per leg end
-    # a boat's n-th leg of a type ends at the course's n-th leg of that type, so a
-    # dropped/extra leg in one track doesn't shift its later roundings
-    course_ix, seen = {}, {}
-    for ci, leg in enumerate(course):
-        course_ix[(leg["type"], seen.get(leg["type"], 0))] = ci
-        seen[leg["type"]] = seen.get(leg["type"], 0) + 1
-    kind_type = {"upwind": "U", "reach": "R", "downwind": "D"}
+    cix_by_sail = {b.sail: R.course_index(course, legs_by_sail[b.sail]) for b in boats}
     rounds_by_sail = {}
     for b in boats:
         lg = legs_by_sail[b.sail]
         gi0 = int(np.argmin(np.abs(b.t - gun_t)))
-        rounds, k0, cnt = [], gi0, {}
+        rounds, k0 = [], gi0
         for li in range(len(lg)):
-            typ = kind_type.get(lg[li][2])
-            ci = course_ix.get((typ, cnt.get(typ, 0)))
-            cnt[typ] = cnt.get(typ, 0) + 1
+            ci = cix_by_sail[b.sail][li]
             tgts = seq_xy[ci] if ci is not None else []
             if not tgts or k0 >= len(b.t) - 2:
                 rounds.append(None); continue
@@ -341,6 +340,7 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
             "sog": r2(b.sog), "cog": r1(b.cog), "twa": r1(b.twa),
             "vmg": r2(b.vmg), "tack": [int(x) for x in b.tack],
             "legs": [[int(a), int(c), kind] for (a, c, kind) in legs],
+            "course_ix": cix_by_sail[b.sail],
             "maneuvers": [vars(m) for m in mans],
             "progress": (rnan(prog, 1) if prog is not None else None),
             "summary": summary,
@@ -487,6 +487,8 @@ def normalize_course(course):
         raise ValueError("A course needs at least 2 legs.")
     out = []
     for i, leg in enumerate(course):
+        if not isinstance(leg, dict):
+            raise ValueError(f"Leg {i + 1}: bad format.")
         typ = str(leg.get("type", "")).upper()[:1]
         mark = str(leg.get("mark", "")).strip()[:6]
         if mark and not re.fullmatch(r"[A-Za-z0-9._-]+", mark):
@@ -569,6 +571,9 @@ def build_race_cached(rid, race, force=False):
     cpath, mpath = race_cache_path(rid, race["id"]), _meta_path(rid, race["id"])
     h = race_cfg_hash(race)
     meta = _read_json(mpath)
+    if not force and meta and meta.get("cfg") == h and meta.get("error") \
+            and os.path.getmtime(mpath) >= _src_mtime():
+        return meta["error"]                      # same inputs failed before: don't re-parse
     if not force and meta and meta.get("cfg") == h and os.path.exists(cpath) \
             and os.path.getmtime(cpath) >= _src_mtime():
         if meta.get("name") != race["name"] or meta.get("key") != race.get("key") or "entry" not in meta:
@@ -581,24 +586,32 @@ def build_race_cached(rid, race, force=False):
             _write_json(mpath, {"cfg": h, "name": race["name"], "key": race.get("key"),
                                 "entry": index_entry(0, race["id"], data)})
         return None
-    if not kml_files(race):
-        drop_race_cache(rid, race["id"])
-        return f"No .kml files in {race_dir_abs(race)}"
-    print(f"  parsing {race['name']} ...", flush=True)
     try:
-        data = build_race(race_dir_abs(race), race["name"], race["course"], race.get("gun"), race.get("key"))
-    except Exception as e:
+        data = analyse(race_dir_abs(race), race)
+    except ValueError as e:
         drop_race_cache(rid, race["id"])
-        return f"Analysis failed: {type(e).__name__}: {e}"
-    if data is None:
-        drop_race_cache(rid, race["id"])
-        return "No usable tracks: expected TracTrac KML files (timestamped points, 30+ fixes per boat)."
+        _write_json(mpath, {"cfg": h, "error": str(e)})
+        return str(e)
     store_race_cache(rid, race, data)
     return None
 
 
+def analyse(race_dir, race):
+    """Run the analysis for a race config on a folder of tracks; ValueError if it fails."""
+    if not list_kml(race_dir):
+        raise ValueError(f"No .kml files in {race_dir}")
+    print(f"  parsing {race['name']} ...", flush=True)
+    try:
+        data = build_race(race_dir, race["name"], race["course"], race.get("gun"), race.get("key"))
+    except Exception as e:
+        raise ValueError(f"Analysis failed: {type(e).__name__}: {e}")
+    if data is None:
+        raise ValueError("No usable tracks: expected TracTrac KML files (timestamped points, 30+ fixes per boat).")
+    return data
+
+
 def write_index(rid):
-    """Assemble cache/<rid>/index.json from the per-race meta entries (no track data)."""
+    """The regatta's race index, assembled from the per-race meta entries (no track data)."""
     rg = find_regatta(load_registry(), rid)
     if rg is None:
         return None
@@ -607,7 +620,6 @@ def write_index(rid):
         meta = _read_json(_meta_path(rid, race["id"]))
         if meta and meta.get("entry") and os.path.exists(race_cache_path(rid, race["id"])):
             index.append({**meta["entry"], "i": len(index)})
-    _write_json(os.path.join(CACHE_DIR, rid, "index.json"), index)
     return index
 
 
@@ -685,6 +697,8 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": False, "error": msg}, code)
 
     def do_GET(self):
+        if not self._local_host():
+            return self._send(403, "forbidden", "text/plain")
         path = urlparse(self.path).path
         if path == "/" or path == "/index.html":
             return self._file(os.path.join(STATIC_DIR, "index.html"), "text/html; charset=utf-8")
@@ -711,14 +725,17 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("File too large (max 64 MB).")
         return self.rfile.read(n) if n else b""
 
+    LOCAL = ("127.0.0.1", "localhost")
+
+    def _local_host(self):
+        """DNS-rebinding guard: only answer requests addressed to this machine."""
+        return urlparse("//" + (self.headers.get("Host") or "")).hostname in self.LOCAL
+
     def _same_origin(self):
-        """Block cross-site requests (CSRF / DNS rebinding): local Host and Origin,
-        plus a custom header that a foreign page can't send without a preflight."""
-        local = ("127.0.0.1", "localhost")
-        if urlparse("//" + (self.headers.get("Host") or "")).hostname not in local:
-            return False
+        """CSRF guard for state changes: local Host and Origin, plus a custom
+        header that a foreign page can't send without a (refused) preflight."""
         origin = self.headers.get("Origin")
-        if origin and urlparse(origin).hostname not in local:
+        if not self._local_host() or (origin and urlparse(origin).hostname not in self.LOCAL):
             return False
         return self.headers.get("X-Sail-Analyzer") == "1"
 
@@ -734,6 +751,8 @@ class Handler(BaseHTTPRequestHandler):
             if parts[-1] == "file":                       # raw KML upload
                 return self._upload(parts, parse_qs(u.query).get("name", [""])[0], raw)
             body = json.loads(raw.decode("utf-8") or "{}")
+            if not isinstance(body, dict):
+                raise ValueError("Bad request body.")
             with LOCK:
                 return self._route(parts, body)
         except ValueError as e:
@@ -789,15 +808,25 @@ class Handler(BaseHTTPRequestHandler):
         if race is None:
             return self._err("unknown race", 404)
         action = parts[5]
-        if action == "update":
-            course = normalize_course(body.get("course"))
-            gun = normalize_gun(body.get("gun"))
-            if course != race["course"]:
-                race["key"] = new_key(rid, race["id"])   # old hand-edited marks don't fit
-            race["name"] = clean_text(body.get("name", race["name"]), 60) or race["name"]
-            race["course"], race["gun"] = course, gun
+        if action == "update":                    # name / course / gun; analysed before saving
+            new = {**race, "course": normalize_course(body.get("course")),
+                   "gun": normalize_gun(body.get("gun")),
+                   "name": clean_text(body.get("name", race["name"]), 60) or race["name"]}
+            if new["course"] != race["course"]:
+                new["key"] = new_key(rid, race["id"])    # old hand-edited marks don't fit
+            data = None
+            if new["course"] != race["course"] or new["gun"] != race.get("gun"):
+                data = analyse(race_dir_abs(race), new)  # raises -> nothing saved
+            race.clear()
+            race.update(new)
             save_registry(reg)
-            return self._json({"ok": True})
+            if data is not None:
+                store_race_cache(rid, race, data)
+                err = None
+            else:
+                err = build_race_cached(rid, race)        # rename: patches the cache
+            write_index(rid)
+            return self._err(err) if err else self._json({"ok": True})
         if action == "stage":                     # empty staging folder for a new set of tracks
             st = staging_dir_for(rid, race["id"])
             shutil.rmtree(st, ignore_errors=True)
@@ -813,20 +842,19 @@ class Handler(BaseHTTPRequestHandler):
                 new["gun"] = normalize_gun(body.get("gun"))
                 new["name"] = clean_text(body.get("name", race["name"]), 60) or race["name"]
             new["key"] = new_key(rid, race["id"])  # new tracks: old hand-edited marks don't apply
-            try:
-                data = build_race(st, new["name"], new["course"], new.get("gun"), new["key"])
-            except Exception as e:
-                raise ValueError(f"Analysis failed: {type(e).__name__}: {e}")
-            if data is None:
-                raise ValueError("No usable tracks: expected TracTrac KML files "
-                                 "(timestamped points, 30+ fixes per boat).")
+            data = analyse(st, new)               # raises -> the current tracks stay
             d = upload_dir_for(rid, race["id"])
-            os.makedirs(d, exist_ok=True)
-            for f in list_kml(d):
-                os.remove(f)                      # only the app's own uploaded copies
-            for f in list_kml(st):
-                os.replace(f, os.path.join(d, os.path.basename(f)))
-            shutil.rmtree(st, ignore_errors=True)
+            old = d + ".old"
+            shutil.rmtree(old, ignore_errors=True)
+            if os.path.isdir(d):
+                os.replace(d, old)                # whole-folder swap: never half-replaced
+            try:
+                os.replace(st, d)
+            except OSError:
+                if os.path.isdir(old):
+                    os.replace(old, d)
+                raise
+            shutil.rmtree(old, ignore_errors=True)
             new["dir"] = os.path.relpath(d, HERE).replace("\\", "/")
             race.clear()
             race.update(new)

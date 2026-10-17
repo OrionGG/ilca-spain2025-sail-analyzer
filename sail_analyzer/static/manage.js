@@ -151,10 +151,9 @@ async function saveRace(){
       await uploadAll(rid, f.id, f.files);
       mgStatus('Analysing… (10–30 s for a big fleet)');
       await api(`${base}/commit`, payload);
-    } else {
-      await api(`${base}/update`, payload);
+    } else {                                   // course/gun change is analysed before it's saved
       mgStatus('Analysing… (10–30 s for a big fleet)');
-      await api(`${base}/build`, {});
+      await api(`${base}/update`, payload);
     }
     fresh = false;                             // saved: nothing to roll back from here on
     MG.form = null;

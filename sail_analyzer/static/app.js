@@ -896,10 +896,9 @@ function tabPosition(body){
   // position at each mark rounding: rank by arrival time at each leg end
   // (final leg ranked by race_min = finish-line crossing)
   body.insertAdjacentHTML('beforeend','<div class="sectitle">Position at each mark (rounding order)</div>');
-  const NL=Math.max(...pool.map(o=>boatLegs(o).length));
+  const NL=Math.max(0,...pool.map(o=>1+Math.max(-1,...boatLegs(o).map((_,li)=>courseIdx(o,li)))));
   // rounding time: mark-proximity (server 'rounds', sharp) >> leg-boundary (smoothed)
-  const roundT=(boat,i)=>{ const rr=boat.rounds; if(rr&&rr[i]!=null) return rr[i];
-    const lg=boatLegs(boat); return lg[i]?boat.t[lg[i][1]]:null; };
+  const roundT=(boat,ci)=>dbRoundT(boat,ci);
   const rankAtLeg=(boat,i)=>{ const myT=roundT(boat,i); if(myT==null) return null;
     let rk2=1;
     for(const o of pool){ if(o===boat) continue; const oT=roundT(o,i);
@@ -907,7 +906,7 @@ function tabPosition(body){
     return rk2; };
   let mt=`<table><tr><th>Boat</th>${Array.from({length:NL},(_,i)=>`<th>${esc(legMarkLabel(i))}</th>`).join('')}</tr>`;
   const rowFor=(boat,color)=>{ let prev=null, tds='';
-    for(let i=0;i<NL;i++){ const rk2=rankAtLeg(boat,i);
+    for(let i=0;i<NL;i++){ const rk2=isLastFor(boat,i)?dbFinishRank(boat,pool):rankAtLeg(boat,i);   // last leg: finish line
       const d=(rk2!=null&&prev!=null)?rk2-prev:null; if(rk2!=null)prev=rk2;
       const badge=d==null||d===0?'':` <span class="${d<0?'good':'bad'}" style="font-size:10px">${d<0?'+'+(-d):'−'+d}</span>`;
       tds+=`<td>${rk2==null?'–':'P'+rk2}${badge}</td>`; }
@@ -1019,8 +1018,12 @@ const pctl=(a,p)=>{ a=a.filter(v=>v!=null&&isFinite(v)).sort((x,y)=>x-y); return
 const mmss=t=>fmtT(t-S.tMin);
 const plur=(n,w)=>`${n} ${w}${n===1?'':'s'}`;
 function dbPool(){ const p=finishers().slice(); for(const b of [focusB(),partnerB()]) if(b&&!p.includes(b)) p.push(b); return p; }
-function dbRoundT(b,i){ if(i<0) return S.race.gun_t; const rr=b.rounds; if(rr&&rr[i]!=null) return rr[i];
-  const lg=boatLegs(b); return lg[i]?b.t[lg[i][1]]:null; }
+// Rounding time of course leg ci's mark for boat b (null if b never sailed that leg).
+function dbRoundT(b,ci){ if(ci==null||ci<0) return null; const lg=boatLegs(b);
+  for(let li=0;li<lg.length;li++) if(courseIdx(b,li)===ci){
+    const rr=b._mlegs?null:b.rounds; return rr&&rr[li]!=null?rr[li]:b.t[lg[li][1]]; }
+  return null; }
+function isLastFor(b,ci){ const lg=boatLegs(b); return lg.length>0 && courseIdx(b,lg.length-1)===ci; }
 function dbRankAtMark(b,i,pl){ const my=dbRoundT(b,i); if(my==null) return null; let r=1;
   for(const o of pl){ if(o===b) continue; const ot=dbRoundT(o,i); if(ot!=null&&ot<my) r++; } return r; }
 function dbRankAtT(b,t,pl){ const k=gk(t), my=boatCourse(b)[k]; if(my==null) return null; let r=1;
@@ -1032,16 +1035,13 @@ function windVecs(t){ const w=windAtT(t)*Math.PI/180;           // u = upwind, l
 function countIn(arr,t0,t1,kind){ return (arr||[]).filter(m=>m.t>=t0&&m.t<=t1&&(!kind||m.kind===kind)).length; }
 function trackMean(b,t0,t1,f){ const i0=idxAt(b,t0), i1=idxAt(b,t1); let s=0,n=0;
   for(let i=i0;i<=i1;i++){ const v=f(i); if(v!=null&&isFinite(v)){ s+=v; n++; } } return n?s/n:null; }
-// Course leg for a boat's leg li: its n-th leg of a type is the course's n-th leg of
-// that type (as on the server), so a dropped leg doesn't shift later marks.
-function courseIdx(b,li){ const lg=boatLegs(b), c=courseLegs(); if(!lg[li]) return -1;
-  const kind=lg[li][2], T={upwind:'U',reach:'R',downwind:'D'}[kind];
-  let n=0; for(let j=0;j<li;j++) if(lg[j][2]===kind) n++;
-  for(let ci=0;ci<c.length;ci++) if(c[ci].type===T && n--===0) return ci;
-  return -1; }
-function markForRound(b,i){ const leg=courseLegs()[courseIdx(b,i)]; return leg?markBy(leg.mark):[]; }
-// seconds spent inside the R-metre zone around the mark rounded at the end of leg i
-function roundingZone(o,i,R=50){ const t=dbRoundT(o,i); if(t==null) return null; const mk=markForRound(o,i); if(!mk.length) return null;
+// Course leg index of boat b's leg li (server course_ix: matched by leg-type order;
+// legs re-derived from hand-placed marks follow the course one to one).
+function courseIdx(b,li){ if(b._mlegs) return li; const cx=b.course_ix; if(!cx) return li;
+  return cx[li]==null?-1:cx[li]; }
+function markForRound(ci){ const leg=courseLegs()[ci]; return leg?markBy(leg.mark):[]; }
+// seconds spent inside the R-metre zone around the mark of course leg ci
+function roundingZone(o,ci,R=50){ const t=dbRoundT(o,ci); if(t==null) return null; const mk=markForRound(ci); if(!mk.length) return null;
   const d=j=>Math.min(...mk.map(m=>distM(o.lat[j],o.lon[j],m[0],m[1])));
   const j0=idxAt(o,t); if(d(j0)>R) return null; let a=j0,c=j0;
   while(a>0&&d(a-1)<R&&o.t[j0]-o.t[a-1]<120) a--;
@@ -1126,13 +1126,14 @@ function debriefChecks(b){
   // ---------------- LEGS ----------------
   let beatNo=0, runNo=0;
   legs.forEach(([a,c,kind],li)=>{
-    const tA=li===0?gun:dbRoundT(b,li-1), tB=dbRoundT(b,li); if(tA==null||tB==null||tB<=tA) return;
+    const ci=courseIdx(b,li), cp=li>0?courseIdx(b,li-1):-1;          // course legs (this / previous)
+    const tA=li===0?gun:dbRoundT(b,cp), tB=dbRoundT(b,ci); if(tA==null||tB==null||tB<=tA) return;
     const isLast=li===legs.length-1;
-    const endRank=o=>(li===boatLegs(o).length-1)?dbFinishRank(o,pl):dbRankAtMark(o,li,pl);
-    const r0=li===0?dbRankAtT(b,gun+120,pl):dbRankAtMark(b,li-1,pl), r1=endRank(b);
+    const endRank=o=>isLastFor(o,ci)?dbFinishRank(o,pl):dbRankAtMark(o,ci,pl);
+    const r0=li===0?dbRankAtT(b,gun+120,pl):dbRankAtMark(b,cp,pl), r1=endRank(b);
     const dPl=(r0!=null&&r1!=null)?r0-r1:null;                       // + = places gained
-    const win=o=>[li===0?gun:dbRoundT(o,li-1),
-      (li===boatLegs(o).length-1&&o.summary.race_min!=null)?gun+o.summary.race_min*60:dbRoundT(o,li)];
+    const win=o=>[li===0?gun:dbRoundT(o,cp),
+      (isLastFor(o,ci)&&o.summary.race_min!=null)?gun+o.summary.race_min*60:dbRoundT(o,ci)];
     const PH=kind==='upwind'?(++beatNo===1?'First beat':beatNo===2?'Second beat':`Beat ${beatNo}`):
              kind==='downwind'?(++runNo===1?'First run':`Run ${runNo}`):`Reach (leg ${li+1})`;
     if(dPl!=null) add(PH, dPl>=3?'good':dPl<=-3?'bad':'info', 'Places on the leg',
@@ -1215,11 +1216,11 @@ function debriefChecks(b){
         const onPort=sg.filter(v=>v>0).length>sg.length/2, late=countIn(b.maneuvers,tB-40,tB-3,'tack');
         const twA=trackMean(b,tB-50,tB-10,i=>b.twa[i]<110?b.twa[i]:null), tUp=b.summary.twa_up;
         const over=(twA!=null&&tUp!=null)?twA-tUp:null;
-        const traffic=pl.filter(o=>o!==b&&dbRoundT(o,li)!=null&&Math.abs(dbRoundT(o,li)-tB)<=20).length;
+        const traffic=pl.filter(o=>o!==b&&dbRoundT(o,ci)!=null&&Math.abs(dbRoundT(o,ci)-tB)<=20).length;
         let v='good', txt=`Approached on <b>${onPort?'port':'starboard'}</b>${late?`, tacked ${late}× in the last 40 s`:''}; ${traffic} boat${traffic!==1?'s':''} rounding within ±20 s.`;
         if(onPort&&late>0&&traffic>=3){ v='warn'; txt+=' Avoid the port-layline pile: come in on starboard a little early rather than tacking into the queue\'s wind shadow.'; }
         if(over!=null&&over>=12){ v='warn'; txt+=` Overstood: sailed ~${over.toFixed(0)}° freer than close-hauled into the mark (extra distance).`; }
-        const cl=courseLegs()[courseIdx(b,li)];
+        const cl=courseLegs()[ci];
         add(PH,v,`Approach to ${!cl?'the mark':cl.gate?'the gate':'mark '+esc(cl.mark)}`,txt,tB-40, v==='warn'?1:0);
       }
     }
@@ -1227,19 +1228,19 @@ function debriefChecks(b){
       const gyl=o=>{ const [x0,x1]=win(o); return x0!=null&&x1!=null?countIn(o.maneuvers,x0,x1,'gybe'):null; };
       const myG=gyl(b), fG=medN(pl.map(gyl));
       add(PH,'info','Gybes',`${plur(myG,'gybe')} (fleet median ${fG??'–'}).`, tA);
-      const cl=courseLegs()[courseIdx(b,li)], G=cl&&cl.gate?markBy(cl.mark):[];
+      const cl=courseLegs()[ci], G=cl&&cl.gate?markBy(cl.mark):[];
       if(G.length===2&&!isLast){
-        const gateOf=o=>{ const t=dbRoundT(o,li); if(t==null) return null; const bd=[1e9,1e9];
+        const gateOf=o=>{ const t=dbRoundT(o,ci); if(t==null) return null; const bd=[1e9,1e9];
           for(let i=idxAt(o,t-30);i<=idxAt(o,t+30);i++) for(const g of [0,1]) bd[g]=Math.min(bd[g],distM(o.lat[i],o.lon[i],G[g][0],G[g][1]));
           return Math.min(...bd)>60?null:(bd[0]<=bd[1]?0:1); };
         const GO=new Map(pl.map(o=>[o,gateOf(o)])), gi=GO.get(b), used=[...GO.values()].filter(v=>v!=null);
         const share=used.length?used.filter(v=>v===0).length/used.length:0;
         if(gi!=null&&share>=0.15&&share<=0.85){
-          const near=pl.filter(o=>o!==b&&GO.get(o)!=null&&Math.abs(dbRoundT(o,li)-tB)<=25);
+          const near=pl.filter(o=>o!==b&&GO.get(o)!=null&&Math.abs(dbRoundT(o,ci)-tB)<=25);
           const same=near.filter(o=>GO.get(o)===gi).length, other=near.length-same;
           const wv2=windVecs(tB), q=g=>{ const [x,y]=toXY(g[0],g[1]); return x*wv2.l[0]+y*wv2.l[1]; };
           const side=q(G[gi])>q(G[1-gi])?'right':'left';
-          const nr0=dbRankAtMark(b,li,pl), nr1=(li+1===legs.length-1)?dbFinishRank(b,pl):dbRankAtMark(b,li+1,pl);
+          const nr0=dbRankAtMark(b,ci,pl), nr1=(li+1===legs.length-1)?dbFinishRank(b,pl):dbRankAtMark(b,courseIdx(b,li+1),pl);
           const nd=(nr0!=null&&nr1!=null)?nr0-nr1:null, v=same>other+2?'warn':'good';
           add(PH,v,'Gate choice',`Rounded the <b>${side}</b> gate mark (looking upwind) with ${plur(same,'boat')} within ±25 s; ${other} at the other one `+
             `(fleet split ${Math.round(share*100)}/${Math.round((1-share)*100)}). `+(nd!=null?`Next leg: ${nd>0?'+':''}${nd} places. `:'')+
@@ -1248,7 +1249,7 @@ function debriefChecks(b){
       }
     }
     if(!isLast){
-      const z=roundingZone(b,li), fz=medN(pl.map(o=>roundingZone(o,li)));
+      const z=roundingZone(b,ci), fz=medN(pl.map(o=>roundingZone(o,ci)));
       if(z!=null&&fz!=null){ const loss=z-fz;
         add(PH, loss<=3?'good':loss>10?'warn':'info','Mark rounding',`${z.toFixed(0)} s through the 50 m zone (fleet median ${fz.toFixed(0)} s, ${fmtS(loss,0)} s).`+
           (loss>10?' Wide in, tight out: set up wide, exit close to the mark on the new course.':''), tB, loss>10?1:0); }
@@ -1257,7 +1258,7 @@ function debriefChecks(b){
   });
 
   // ---------------- MINDSET ----------------
-  const ranks=[dbRankAtT(b,gun+120,pl)]; for(let i=0;i<legs.length-1;i++) ranks.push(dbRankAtMark(b,i,pl));
+  const ranks=[dbRankAtT(b,gun+120,pl)]; for(let i=0;i<legs.length-1;i++) ranks.push(dbRankAtMark(b,courseIdx(b,i),pl));
   const fin=dbFinishRank(b,pl); ranks.push(fin);
   const vr=ranks.filter(v=>v!=null);
   if(fin!=null&&vr.length>=2){
@@ -1375,8 +1376,12 @@ function showEmpty(){
 }
 function setBusy(msg){ const el=$('#busy'); if(!el) return; el.textContent=msg||''; el.style.display=msg?'':'none'; }
 async function loadRace(i){
-  S.raceIdx=i; setPlaying(false);
-  S.race=await (await fetch('/api/race/'+S.regatta+'/'+S.index[i].id)).json();
+  setPlaying(false);
+  let race=null;
+  try{ const r=await fetch('/api/race/'+S.regatta+'/'+S.index[i].id); if(r.ok) race=await r.json(); }catch(e){}
+  if(!race){ setBusy('Could not load that race — reopen the regatta to refresh the list.');
+    setTimeout(()=>setBusy(null),5000); $('#raceSel').value=S.raceIdx; return; }
+  S.raceIdx=i; S.race=race;
   $('#raceSel').value=i;
   S._marks=null;                       // reload marks (auto or saved override) per race
   S.legFilter='all';                   // reset leg drill-down for the new race
