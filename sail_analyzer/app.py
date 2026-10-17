@@ -619,42 +619,44 @@ def drop_race_cache(rid, race_id):
             os.remove(f)
 
 
-def build_race_cached(rid, race, force=False):
-    """(Re)build one race's cache when missing/stale. Returns an error string or
-    None. A failed build removes the old cache so stale results are never served."""
+def cache_state(rid, race):
+    """("fresh" | "patch" | "error" | "stale", meta, cfg) of one race's cache."""
     cpath, mpath = race_cache_path(rid, race["id"]), _meta_path(rid, race["id"])
     h = race_cfg_hash(race)
     meta = _read_json(mpath)
-    if not force and meta and meta.get("cfg") == h and meta.get("error") \
-            and os.path.getmtime(mpath) >= SRC_MTIME:
-        return meta["error"]                      # same inputs failed before: don't re-parse
-    if not force and meta and meta.get("cfg") == h and os.path.exists(cpath) \
-            and os.path.getmtime(cpath) >= SRC_MTIME:
-        if meta.get("name") != race["name"] or meta.get("key") != race.get("key") or "entry" not in meta:
-            data = _read_json(cpath)              # rename / new marks key: patch, no re-parse
-            if data is None:
-                drop_race_cache(rid, race["id"])
-                return build_race_cached(rid, race, force=True)
-            data["race"], data["key"] = race["name"], race.get("key") or race["name"]
-            store_race_cache(rid, race, data, h)
-        return None
+    if meta and meta.get("cfg") == h:
+        if meta.get("error") and os.path.getmtime(mpath) >= SRC_MTIME:
+            return "error", meta, h               # same inputs failed before: don't re-parse
+        if os.path.exists(cpath) and os.path.getmtime(cpath) >= SRC_MTIME:
+            stale_label = meta.get("name") != race["name"] or meta.get("key") != race.get("key")
+            return ("patch" if stale_label or "entry" not in meta else "fresh"), meta, h
+    return "stale", meta, h
+
+
+def build_race_cached(rid, race, force=False):
+    """(Re)build one race's cache when missing/stale. Returns an error string or
+    None. A failed build removes the old cache so stale results are never served."""
+    state, meta, h = cache_state(rid, race)
+    if not force:
+        if state == "fresh":
+            return None
+        if state == "error":
+            return meta["error"]
+        if state == "patch":                      # rename / new marks key: no re-parse
+            data = _read_json(race_cache_path(rid, race["id"]))
+            if data is not None:
+                data["race"], data["key"] = race["name"], race.get("key") or race["name"]
+                store_race_cache(rid, race, data, h)
+                return None
     try:
         data = analyse(race_dir_abs(race), race)
     except AnalysisError as e:
         drop_race_cache(rid, race["id"])
         if e.permanent:                           # same inputs will fail again: remember it
-            _write_json(mpath, {"cfg": h, "error": str(e)})
+            _write_json(_meta_path(rid, race["id"]), {"cfg": h, "error": str(e)})
         return str(e)
     store_race_cache(rid, race, data, h)
     return None
-
-
-class AnalysisError(ValueError):
-    permanent = True                              # the same inputs would fail again
-
-
-class TransientError(AnalysisError):
-    permanent = False                             # e.g. a file locked by antivirus / sync
 
 
 def analyse(race_dir, race):
@@ -673,11 +675,8 @@ def analyse(race_dir, race):
     return data
 
 
-def build_index(rid):
+def build_index(rid, rg):
     """The regatta's race index, assembled from the per-race meta entries (no track data)."""
-    rg = find_regatta(load_registry(), rid)
-    if rg is None:
-        return None
     index = []
     for race in rg["races"]:
         meta = _read_json(_meta_path(rid, race["id"]))
@@ -688,8 +687,11 @@ def build_index(rid):
 
 def ensure_cache(rid, rebuild=False):
     """Build missing/stale races of one regatta and return its index."""
-    if find_regatta(load_registry(), rid) is None:
+    rg = find_regatta(load_registry(), rid)
+    if rg is None:
         return None
+    if not rebuild and all(cache_state(rid, r)[0] in ("fresh", "error") for r in rg["races"]):
+        return build_index(rid, rg)               # nothing to build: don't wait for the lock
     with regatta_lock(rid):
         rg = find_regatta(load_registry(), rid)
         if rg is None:
@@ -698,7 +700,7 @@ def ensure_cache(rid, rebuild=False):
             err = build_race_cached(rid, race, force=rebuild)
             if err:
                 print(f"  ! {race['name']}: {err}", flush=True)
-        return build_index(rid)
+        return build_index(rid, rg)
 
 
 def index_entry(i, race_id, data):
@@ -869,8 +871,6 @@ class Handler(BaseHTTPRequestHandler):
             edit_registry(lambda reg: reg.update(regattas=[g for g in reg["regattas"] if g["id"] != rid]))
             for d in (os.path.join(UPLOAD_DIR, rid), os.path.join(CACHE_DIR, rid)):
                 shutil.rmtree(d, ignore_errors=True)       # app-made copies/caches only
-            with _RLOCKS_GUARD:
-                _RLOCKS.pop(rid, None)
             return self._json({"ok": True})
         if parts[3:] == ["races"]:                                         # create race
             course, gun = course_and_gun(body)
@@ -919,6 +919,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("No uploaded .kml files to use.")
             new = {**race, **(race_fields(body, race) if "course" in body else {})}
             new["key"] = new_key(rid, race["id"])  # new tracks: old hand-edited marks don't apply
+            cfg = race_cfg_hash({**new, "dir": st})   # the set analysed (a late upload changes it)
             data = analyse(st, new)               # raises -> the current tracks stay
             d = upload_dir_for(rid, race["id"])
             old = f"{d}.old-{uuid.uuid4().hex[:6]}"   # fresh name: a stuck leftover can't collide
@@ -933,7 +934,7 @@ class Handler(BaseHTTPRequestHandler):
             shutil.rmtree(old, ignore_errors=True)
             new["dir"] = rel_dir(d)
             put_race(rid, race["id"], new)
-            store_race_cache(rid, new, data, race_cfg_hash(new))   # moved files: same size/mtime
+            store_race_cache(rid, new, data, cfg)  # moved files keep name/size/mtime
             return self._json({"ok": True})
         if action == "delete":
             put_race(rid, race["id"], None)

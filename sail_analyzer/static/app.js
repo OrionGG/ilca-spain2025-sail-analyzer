@@ -141,7 +141,7 @@ function legsFromMarks(b){
   const c=courseLegs(); if(c.length<2) return null;
   const seq=[];
   for(let i=0;i<c.length;i++){ const ll=markBy(c[i].mark);
-    if(!ll.length){ if(i===c.length-1) break; return null; }
+    if(!ll.length) break;
     seq.push({ll,k:LEG_KIND[c[i].type]}); }
   const n=b.lat.length, R=70;
   const md=(i,lls)=>Math.min(...lls.map(ll=>distM(b.lat[i],b.lon[i],ll[0],ll[1])));
@@ -541,11 +541,11 @@ function keyFindings(body){
   const close=boats.filter(o=>o.sail!==S.focus && Math.abs(o.summary.race_min-rt)*60<=20).length;
   if(rt!=null&&medRT!=null) B.push(`Finished ~<b>P${rank}/${n}</b>${nRet?` (of ${nStarted} started; ${nRet} retired)`:''} by elapsed time (${rt} min, fleet median ${medRT.toFixed(1)}; ${fmtS(rt-medRT,1)} min)`+
     (close>0?` — but ${close} boat${close>1?'s are':' is'} within GPS finish error (~20 s), so the exact place is uncertain.`:'.'));
-  // per-leg time vs fleet median
-  const nl=boatLegs(f).length, fast=[], slow=[];
-  for(let i=0;i<nl;i++){ const ts=boats.map(o=>{const lg=boatLegs(o); return lg[i]?(o.t[lg[i][1]]-o.t[lg[i][0]]):null;}).filter(x=>x!=null);
-    const mt=med(ts), lg=boatLegs(f)[i]; const ft=lg?f.t[lg[1]]-f.t[lg[0]]:null;
-    if(ft!=null&&mt!=null){ const d=ft-mt; if(d<-6)fast.push(i+1); else if(d>6)slow.push(i+1); } }
+  // per-leg time vs fleet median, leg by leg of the course
+  const legT=(o,ci)=>{ const li=ciMap(o)[ci]; if(li==null) return null; const lg=boatLegs(o)[li]; return o.t[lg[1]]-o.t[lg[0]]; };
+  const fCis=boatLegs(f).map((_,li)=>courseIdx(f,li)).filter(ci=>ci>=0), fast=[], slow=[];
+  for(const ci of fCis){ const mt=med(boats.map(o=>legT(o,ci)).filter(x=>x!=null)), ft=legT(f,ci);
+    if(ft!=null&&mt!=null){ const d=ft-mt; if(d<-6)fast.push(ci+1); else if(d>6)slow.push(ci+1); } }
   if(fast.length) B.push(`Gained on the fleet on leg${fast.length>1?'s':''} <b class="good">${fast.join(', ')}</b>; lost on leg${slow.length>1?'s':''} <b class="bad">${slow.join(', ')||'none'}</b>.`);
   // speed/pointing/distance vs fleet
   const sp=[]; if(s.sog_up!=null)sp.push(`upwind ${fmtS(s.sog_up-fm.sog_up)} kt`); if(s.sog_dn!=null)sp.push(`downwind ${fmtS(s.sog_dn-fm.sog_dn)} kt`);
@@ -570,8 +570,7 @@ function keyFindings(body){
   // partner line
   let pb='';
   if(p){ const ps=p.summary; const dt=(rt!=null&&ps.race_min!=null)?(rt-ps.race_min)*60:null;
-    const pf=[]; for(let i=0;i<Math.min(nl,boatLegs(p).length);i++){ const lf=boatLegs(f)[i],lpg=boatLegs(p)[i];
-      if(lf&&lpg){ const d=(f.t[lf[1]]-f.t[lf[0]])-(p.t[lpg[1]]-p.t[lpg[0]]); if(d<-4)pf.push(i+1); } }
+    const pf=[]; for(const ci of fCis){ const a=legT(f,ci), b2=legT(p,ci); if(a!=null&&b2!=null&&a-b2<-4) pf.push(ci+1); }
     const finishTxt = dt==null ? '' :
       (Math.abs(dt)<=20 ? `<b>near-dead-heat</b> (~${Math.abs(dt).toFixed(0)} s — within GPS finish error, true order from official results), `
                         : `crossed ~<b>${Math.abs(dt).toFixed(0)} s ${dt<=0?'ahead':'behind'}</b>, `);
@@ -1335,9 +1334,13 @@ function setWind(deg){ $('#windVal').textContent=deg.toFixed(0)+'°';
 // ---------- load ----------
 // Regattas (registry) -> races of the selected regatta (index) -> one race.
 async function fetchRegattas(){
-  const j=await (await fetch('/api/regattas')).json();
+  let j=null;
+  try{ const r=await fetch('/api/regattas'); j=await r.json().catch(()=>null);
+    if(!r.ok||!j||!Array.isArray(j.regattas)) throw new Error((j&&j.error)||('HTTP '+r.status)); }
+  catch(e){ setBusy('Could not read the regatta list: '+e.message); setTimeout(()=>setBusy(null),6000); return false; }
   S.regattas=j.regattas; S.templates=j.templates;
   fillRegSel(S.regatta);
+  return true;
 }
 function fillRegSel(rid){
   const gs=$('#regSel'); gs.innerHTML='';
@@ -1345,7 +1348,7 @@ function fillRegSel(rid){
   gs.value=rid||''; gs.onchange=()=>loadIndex(gs.value);
 }
 async function loadRegattas(rid, raceId){
-  await fetchRegattas();
+  if(!await fetchRegattas()){ if(!S.regattas.length) showEmpty(); return; }   // keep the current view + message
   let keep=null; try{ keep=localStorage.getItem('sa_regatta'); }catch(e){}
   rid=rid||S.regatta||keep;
   if(!S.regattas.some(g=>g.id===rid)) rid=S.regattas.length?S.regattas[0].id:null;
@@ -1396,9 +1399,9 @@ async function loadRace(i){
     if(S.raceRid!==S.regatta){                 // shown race belongs to the previous regatta: drop it
       S.race=null; S.raceIdx=-1; S.byS={}; S.view=null; $('#raceSel').value='';
       renderBG(); render(); setTab(S.tab);
-    } else $('#raceSel').value=S.raceIdx;
+    } else { S.raceIdx=S.index.findIndex(x=>x.id===S.raceId); $('#raceSel').value=S.raceIdx>=0?S.raceIdx:''; }
     return; }
-  S.raceIdx=i; S.race=race; S.raceRid=S.regatta;
+  S.raceIdx=i; S.race=race; S.raceRid=S.regatta; S.raceId=S.index[i].id;
   $('#raceSel').value=i;
   S._marks=null;                       // reload marks (auto or saved override) per race
   S.legFilter='all';                   // reset leg drill-down for the new race

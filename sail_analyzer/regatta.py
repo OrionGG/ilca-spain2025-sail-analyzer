@@ -612,14 +612,14 @@ def _split_gate(pts):
     return [gm] if gm else []
 
 
-def detect_marks(boats, wind_from, legs_by_sail, course, cix_by_sail=None):
+def detect_marks(boats, wind_from, legs_by_sail, course, cix_by_sail):
     """
     Locate the course marks at the fleet's actual rounding points, driven by the
     race's course definition: a list of legs {"type": U|R|D, "mark": label,
     "gate": bool}, each ending at its mark; the last leg ends at the finish.
 
-    Each boat's legs are matched to course legs by `cix_by_sail` (template
-    indices from `segment_legs`; `course_index` when missing). Candidate rounding points per boat: the
+    Each boat's legs are matched to course legs by `cix_by_sail` (course leg
+    index per boat leg, None for legs outside the course). Candidate rounding points per boat: the
     furthest-upwind point of a beat / furthest-downwind point of a run, and the
     turn apex at the leg end. Per mark the candidate the fleet's tracks pass
     closest to wins (beats into the top mark favour the furthest-upwind point,
@@ -645,8 +645,7 @@ def detect_marks(boats, wind_from, legs_by_sail, course, cix_by_sail=None):
         if b.x is None or not legs:
             continue
         p = b.x * ux + b.y * uy
-        cix = (cix_by_sail or {}).get(b.sail)
-        for li, ci in enumerate(cix if cix is not None else course_index(course, legs)):
+        for li, ci in enumerate(cix_by_sail[b.sail]):
             if ci is None or ci >= K - 1:             # unmatched leg / the finish leg
                 continue
             a, c, _ = legs[li]
@@ -659,9 +658,9 @@ def detect_marks(boats, wind_from, legs_by_sail, course, cix_by_sail=None):
             nxt = legs[li + 1][1] if li + 1 < len(legs) else min(len(b.t) - 1, c + 60)
             wins[L].append((b, a, nxt))
 
-    def closest_pass(ll):
+    def closest_pass(ll, spans):
         d = [float(np.min(np.hypot(*to_xy(b.lat[i0:i1 + 1], b.lon[i0:i1 + 1], ll[0], ll[1])[:2])))
-             for b, i0, i1 in wins[L] if i1 > i0]
+             for b, i0, i1 in spans if i1 > i0]
         return float(np.median(d)) if d else float("inf")
 
     marks = []
@@ -672,7 +671,7 @@ def detect_marks(boats, wind_from, legs_by_sail, course, cix_by_sail=None):
         else:
             opts = [_med_xy([(la, lo) for la, lo, _ in cand[L][k]]) for k in ("ext", "apex")]
             opts = [o for o in opts if o]
-            lls = [min(opts, key=closest_pass)] if opts else []
+            lls = [min(opts, key=lambda ll: closest_pass(ll, wins[L]))] if opts else []
         marks += [{"label": L, "ll": ll} for ll in lls]
     fin = detect_finish(boats, legs_by_sail)
     if fin:

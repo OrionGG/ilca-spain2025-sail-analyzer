@@ -167,15 +167,14 @@ async function saveRace(){
       try{ await api(`/api/regatta/${rid}/race/${f.id}/delete`, {}); }catch(_){}
       f.mode = 'add'; delete f.id;
     }
-    await refreshRegattas();
+    await fetchRegattas();
     mgStatus('Error: '+e.message+' — fix it and save again.');
   }
 }
-const refreshRegattas = fetchRegattas;
 
 async function newRegatta(){
   const name = prompt('Regatta name (e.g. "Europa Cup Hyères 2026"):'); if(!name||!name.trim()) return;
-  try{ const j = await api('/api/regattas', {name}); MG.rid = j.id; await refreshRegattas();
+  try{ const j = await api('/api/regattas', {name}); MG.rid = j.id; await fetchRegattas();
     MG.form = blankForm(); renderManager('Regatta created — add its first race.'); }
   catch(e){ mgStatus('Error: '+e.message); }
 }
@@ -199,7 +198,7 @@ async function deleteRace(raceId){
   if(!confirm(`Delete race “${r.name}”?\n${r.uploaded?'Its uploaded track copies are removed.':'Your original folder is not touched.'}`)) return;
   try{ await api(`/api/regatta/${g.id}/race/${raceId}/delete`, {});
     if(S.regatta===g.id) await loadRegattas(g.id, viewedRaceId()===raceId?undefined:viewedRaceId());
-    else await refreshRegattas();
+    else await fetchRegattas();
     MG.form = null; renderManager(`Deleted “${r.name}”.`); }
   catch(e){ mgStatus('Error: '+e.message); }
 }
