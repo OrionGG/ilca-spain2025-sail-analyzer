@@ -57,8 +57,17 @@ These KMLs contain **only GPS position + time** (~3 s). Everything else is deriv
 start line are *inferred* from fleet behaviour, so treat absolute distances/times as
 approximate — the relative comparisons are the trustworthy part.
 
+## Your own regattas
+**Regattas…** (top bar) creates regattas and adds races: pick the folder of KML tracks
+(copied into `data/`), set the course (template or custom leg table: leg type, mark it
+ends at, gate) and an optional gun time. Legs are fitted to the course's leg-type
+sequence; each mark is placed where the fleet actually rounded it (furthest-upwind
+point or turn apex, whichever the tracks pass closest to; gates split into two buoys
+when both were used). See the main README for the step-by-step.
+
 ## Files
-- `app.py` – local HTTP server + cache builder (stdlib only).
-- `regatta.py` – the analytics engine (parsing, wind, VMG, maneuvers, legs, start).
-- `static/` – the offline single-page UI (no CDN).
-- `cache/` – generated per-race JSON (delete to force a rebuild).
+- `app.py` – local HTTP server, regatta registry + upload API, cache builder (stdlib only).
+- `regatta.py` – the analytics engine (parsing, wind, VMG, maneuvers, legs, marks, start).
+- `static/` – the offline single-page UI (no CDN); `manage.js` = Regattas manager.
+- `cache/` – generated per-race JSON (rebuilt automatically when stale).
+- `data/`, `regattas.json` – your uploaded tracks and regatta list (local, gitignored).

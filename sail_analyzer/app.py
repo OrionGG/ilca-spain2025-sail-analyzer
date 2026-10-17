@@ -5,6 +5,12 @@ Run:  python app.py        (parses all races once, caches, opens browser)
       python app.py --rebuild   (force re-parse)
       python app.py --port 8000
 
+Regattas and races are managed from the UI ("Regattas" button): each race is a
+folder of TracTrac KML tracks (uploaded copies live in data/) plus its course
+(leg types + marks) and an optional gun time. The list is kept in
+regattas.json (local, git-ignored); the repo's own race folders are registered
+on first run as the "Copa de España ILCA 7 2025" regatta.
+
 Stdlib only (+ numpy via regatta). No internet required; the UI is fully
 offline (no CDN, no map tiles).
 """
@@ -12,12 +18,15 @@ offline (no CDN, no map tiles).
 from __future__ import annotations
 
 import glob
+import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 import threading
 import webbrowser
+from urllib.parse import parse_qs, urlparse
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -29,6 +38,33 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.dirname(HERE)               # the folder with 01_Prueba 1 ...
 CACHE_DIR = os.path.join(HERE, "cache")
 STATIC_DIR = os.path.join(HERE, "static")
+UPLOAD_DIR = os.path.join(HERE, "data")         # uploaded KML copies: data/<regatta>/<race>/
+REG_PATH = os.path.join(HERE, "regattas.json")  # regatta/race registry (local, git-ignored)
+LOCK = threading.RLock()                        # registry writes + cache builds
+
+# Course templates offered in the UI. Legs: "<type>:<mark>[*]" — type U(pwind) /
+# R(each) / D(ownwind), the mark the leg ends at, * = that mark is a gate.
+# The last leg always ends at the finish line.
+TEMPLATES = [
+    {"id": "trap_outer", "name": "Trapezoid outer — reach finish", "legs": "U:1 R:2 D:G* U:2 D:G* R:F"},
+    {"id": "trap_outer_wing", "name": "Trapezoid outer, wing mark moved (2a/2b)", "legs": "U:1 R:2a D:G* U:2b D:G* R:F"},
+    {"id": "trap_inner", "name": "Trapezoid inner — reach finish", "legs": "U:1 D:4* U:1 R:2 D:3 R:F"},
+    {"id": "wl2_dn", "name": "Windward-leeward, 2 laps, downwind finish", "legs": "U:1 D:G* U:1 D:F"},
+    {"id": "wl2_up", "name": "Windward-leeward, 2 laps, upwind finish", "legs": "U:1 D:G* U:1 D:G* U:F"},
+    {"id": "wl3_dn", "name": "Windward-leeward, 3 laps, downwind finish", "legs": "U:1 D:G* U:1 D:G* U:1 D:F"},
+]
+
+
+def parse_legs(spec: str):
+    out = []
+    for tok in spec.split():
+        typ, mark = tok.split(":")
+        out.append({"type": typ, "mark": mark.rstrip("*"), "gate": mark.endswith("*")})
+    return out
+
+
+def template_course(tid):
+    return parse_legs(next(t["legs"] for t in TEMPLATES if t["id"] == tid))
 
 PALETTE = ["#e6194B", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4",
            "#42d4f4", "#f032e6", "#bfef45", "#fabed4", "#469990", "#dcbeff",
@@ -49,7 +85,18 @@ def rnan(a, nd=1):
 # --------------------------------------------------------------------------- #
 # Build one race into a compact dict
 # --------------------------------------------------------------------------- #
-def build_race(race_dir: str, race_name: str):
+def gun_from_clock(clock: str, t0: float):
+    """'HH:MM[:SS]' (UTC) on the day of the first fix -> epoch seconds."""
+    parts = [int(x) for x in clock.strip().split(":")]
+    h, m, sec = (parts + [0, 0])[:3]
+    day = datetime.fromtimestamp(t0, timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    g = day.timestamp() + h * 3600 + m * 60 + sec
+    if g < t0 - 3 * 3600:                         # track started the evening before
+        g += 86400
+    return float(g)
+
+
+def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
     files = sorted(glob.glob(os.path.join(race_dir, "*.kml")))
     boats = []
     for f in files:
@@ -84,8 +131,9 @@ def build_race(race_dir: str, race_name: str):
     # The gun is a round clock-minute ~5 min after logging starts (logging begins
     # at the warning signal; the first minutes are the pre-start). Leg 1 is
     # anchored there so the pre-start is excluded from the race legs.
-    gun_t = R.detect_gun(boats, wind_from)
-    legs_by_sail = {b.sail: R.segment_legs(b, wind_from, gun_t=gun_t) for b in boats}
+    gun_t = gun_from_clock(gun, min(b.t[0] for b in boats)) if gun else R.detect_gun(boats, wind_from)
+    template = tuple(leg["type"] for leg in course)
+    legs_by_sail = {b.sail: R.segment_legs(b, wind_from, template=template, gun_t=gun_t) for b in boats}
     # a boat "finished" if it sailed the full course (>= the fleet's modal leg count);
     # boats with fewer legs are retirees/DNF and are excluded from fleet metrics
     _lc = {}
@@ -93,11 +141,8 @@ def build_race(race_dir: str, race_name: str):
         _lc[len(lg)] = _lc.get(len(lg), 0) + 1
     mode_legs = max(_lc, key=_lc.get) if _lc else 0
 
-    # course marks at the fleet's actual rounding points (windward / wing /
-    # leeward gate / finish). Prueba 2 & 5 had a wing-mark change between the two
-    # roundings -> report 2a (1st) and 2b (2nd) separately.
-    split_wing = race_name.strip()[-2:] in (" 2", " 5")
-    marks = R.detect_marks(boats, wind_from, legs_by_sail, split_wing=split_wing)
+    # course marks at the fleet's actual rounding points, labelled as in the course
+    marks = R.detect_marks(boats, wind_from, legs_by_sail, course)
 
     # ---- finish times by LINE CROSSING (not leg end, which drifts minutes) ----
     # Finish line: through the fleet-median last-turn apex, perpendicular to the
@@ -166,9 +211,7 @@ def build_race(race_dir: str, race_name: str):
     _mk = {}
     for m in marks:
         _mk.setdefault(m["label"], []).append(_ll_xy(m["ll"]))
-    _w2 = _mk.get("2a", _mk.get("2", [])); _w2b = _mk.get("2b", _mk.get("2", []))
-    _gts = _mk.get("G", []); _fin = _mk.get("F", [])
-    seq_xy = [_mk.get("1", []), _w2, _gts, _w2b, _gts, _fin]      # targets per leg end
+    seq_xy = [_mk.get(leg["mark"], []) for leg in course]           # targets per leg end
     rounds_by_sail = {}
     for b in boats:
         lg = legs_by_sail[b.sail]
@@ -244,18 +287,18 @@ def build_race(race_dir: str, race_name: str):
         }
         # cumulative made-good distance along each leg's OWN axis (handles
         # upwind/reach/downwind uniformly) -> continuous position ladder
-        course = np.zeros(len(b.t)); acc = 0.0
+        made = np.zeros(len(b.t)); acc = 0.0
         for (a, c, kind) in legs:
             axx, ayy = b.x[c] - b.x[a], b.y[c] - b.y[a]
             nrm = float(np.hypot(axx, ayy))
             if c <= a or nrm < 1.0:
-                course[a:] = acc; continue
+                made[a:] = acc; continue
             axx, ayy = axx / nrm, ayy / nrm
             seg = (b.x[a:c + 1] - b.x[a]) * axx + (b.y[a:c + 1] - b.y[a]) * ayy
-            course[a:c + 1] = acc + seg
+            made[a:c + 1] = acc + seg
             acc += float(seg[-1])
-            course[c + 1:] = acc
-        course_grid = np.interp(grid, b.t, course, left=np.nan, right=np.nan)
+            made[c + 1:] = acc
+        course_grid = np.interp(grid, b.t, made, left=np.nan, right=np.nan)
 
         prog = progress.get(b.sail)
         boats_out.append({
@@ -275,6 +318,9 @@ def build_race(race_dir: str, race_name: str):
 
     return {
         "race": race_name,
+        "key": key or race_name,
+        "course": course,
+        "gun_manual": bool(gun),
         "start_t": start_t,
         "gun_t": float(gun_t),
         "start_iso": datetime.fromtimestamp(start_t, timezone.utc).isoformat(),
@@ -288,6 +334,18 @@ def build_race(race_dir: str, race_name: str):
     }
 
 
+# --------------------------------------------------------------------------- #
+# Regatta / race registry (regattas.json)
+# --------------------------------------------------------------------------- #
+def _slug(name):
+    s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return s[:40] or "regatta"
+
+
+def _safe_id(s):
+    return bool(re.fullmatch(r"[a-z0-9-]{1,48}", s or ""))
+
+
 def discover_races():
     dirs = sorted(d for d in glob.glob(os.path.join(DATA_DIR, "*"))
                   if os.path.isdir(d) and glob.glob(os.path.join(d, "*.kml")))
@@ -299,50 +357,200 @@ def discover_races():
     return races
 
 
-def ensure_cache(rebuild=False):
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    # auto-rebuild when the analysis code changed (so a plain restart picks up
-    # new logic instead of serving a stale cache)
-    src_mtime = max(os.path.getmtime(os.path.join(HERE, f)) for f in ("regatta.py", "app.py"))
-    races = discover_races()
-    index = []
-    for i, (d, name) in enumerate(races):
-        cpath = os.path.join(CACHE_DIR, f"race_{i}.json")
-        stale = (not os.path.exists(cpath)) or os.path.getmtime(cpath) < src_mtime
-        if rebuild or stale:
-            print(f"  parsing {name} ...", flush=True)
-            data = build_race(d, name)
-            if data is None:
+def seed_registry():
+    """First run: register the repo's own race folders (Copa de España 2025).
+    Prueba 2 & 5 had the wing mark moved between roundings (2a / 2b)."""
+    races = []
+    for k, (d, name) in enumerate(discover_races()):
+        wing = name.strip()[-2:] in (" 2", " 5")
+        races.append({"id": f"r{k + 1:02d}", "name": name,
+                      "dir": os.path.relpath(d, HERE).replace("\\", "/"),
+                      "course": template_course("trap_outer_wing" if wing else "trap_outer"),
+                      "gun": None, "key": name})
+    reg = {"version": 1, "regattas": []}
+    if races:
+        reg["regattas"].append({"id": "copa2025", "name": "Copa de España ILCA 7 2025", "races": races})
+    return reg
+
+
+def load_registry():
+    with LOCK:
+        if not os.path.exists(REG_PATH):
+            save_registry(seed_registry())
+        with open(REG_PATH, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+
+
+def save_registry(reg):
+    with LOCK:
+        tmp = REG_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(reg, fh, indent=1, ensure_ascii=False)
+        os.replace(tmp, REG_PATH)
+
+
+def find_regatta(reg, rid):
+    return next((g for g in reg["regattas"] if g["id"] == rid), None)
+
+
+def find_race(rg, race_id):
+    return next((r for r in rg["races"] if r["id"] == race_id), None)
+
+
+def race_dir_abs(race):
+    d = race.get("dir") or ""
+    return d if os.path.isabs(d) else os.path.normpath(os.path.join(HERE, d))
+
+
+def upload_dir_for(rid, race_id):
+    return os.path.join(UPLOAD_DIR, rid, race_id)
+
+
+def is_upload_dir(path):
+    return os.path.normpath(path).startswith(os.path.normpath(UPLOAD_DIR) + os.sep)
+
+
+def kml_files(race):
+    d = race_dir_abs(race)
+    return sorted(glob.glob(os.path.join(d, "*.kml"))) if os.path.isdir(d) else []
+
+
+def normalize_course(course):
+    """Validate a course from the UI: >= 2 legs, types U/R/D, mark labels 1-6
+    chars (RC/Pin reserved); the finish label must not be a rounding mark."""
+    if not isinstance(course, list) or len(course) < 2:
+        raise ValueError("A course needs at least 2 legs.")
+    out = []
+    for i, leg in enumerate(course):
+        typ = str(leg.get("type", "")).upper()[:1]
+        mark = str(leg.get("mark", "")).strip()[:6]
+        if typ not in ("U", "R", "D"):
+            raise ValueError(f"Leg {i + 1}: type must be upwind, reach or downwind.")
+        if not mark:
+            raise ValueError(f"Leg {i + 1}: give the mark it ends at.")
+        if mark in ("RC", "Pin"):
+            raise ValueError(f"Leg {i + 1}: '{mark}' is reserved for the start line.")
+        out.append({"type": typ, "mark": mark, "gate": bool(leg.get("gate")) and i < len(course) - 1})
+    if out[-1]["mark"] in [leg["mark"] for leg in out[:-1]]:
+        raise ValueError("The last leg ends at the finish: give it its own label (e.g. F).")
+    return out
+
+
+def normalize_gun(gun):
+    gun = (gun or "").strip()
+    if not gun:
+        return None
+    if not re.fullmatch(r"\d{1,2}:\d{2}(:\d{2})?", gun):
+        raise ValueError("Gun time must be HH:MM or HH:MM:SS (UTC).")
+    h, m = int(gun.split(":")[0]), int(gun.split(":")[1])
+    if h > 23 or m > 59:
+        raise ValueError("Gun time out of range.")
+    return gun
+
+
+# --------------------------------------------------------------------------- #
+# Cache: cache/<regatta>/<race>.json (+ .meta.json), cache/<regatta>/index.json
+# --------------------------------------------------------------------------- #
+def _src_mtime():
+    return max(os.path.getmtime(os.path.join(HERE, f)) for f in ("regatta.py", "app.py"))
+
+
+def race_cfg_hash(race):
+    files = [(os.path.basename(f), os.path.getsize(f), int(os.path.getmtime(f))) for f in kml_files(race)]
+    blob = json.dumps({"course": race.get("course"), "gun": race.get("gun"), "files": files}, sort_keys=True)
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()
+
+
+def race_cache_path(rid, race_id):
+    return os.path.join(CACHE_DIR, rid, f"{race_id}.json")
+
+
+def build_race_cached(rid, race, force=False):
+    """(Re)build one race's cache when missing/stale. Returns an error string or None."""
+    cpath = race_cache_path(rid, race["id"])
+    mpath = cpath[:-5] + ".meta.json"
+    h = race_cfg_hash(race)
+    if not force and os.path.exists(cpath) and os.path.exists(mpath) \
+            and os.path.getmtime(cpath) >= _src_mtime():
+        try:
+            with open(mpath, "r", encoding="utf-8") as fh:
+                if json.load(fh).get("cfg") == h:
+                    return None
+        except (OSError, ValueError):
+            pass
+    if not kml_files(race):
+        return f"No .kml files in {race_dir_abs(race)}"
+    print(f"  parsing {race['name']} ...", flush=True)
+    data = build_race(race_dir_abs(race), race["name"], race["course"], race.get("gun"), race.get("key"))
+    if data is None:
+        return "No usable tracks: expected TracTrac KML files (timestamped points, 30+ fixes per boat)."
+    os.makedirs(os.path.dirname(cpath), exist_ok=True)
+    with open(cpath, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, separators=(",", ":"))
+    with open(mpath, "w", encoding="utf-8") as fh:
+        json.dump({"cfg": h}, fh)
+    return None
+
+
+def ensure_cache(rid, rebuild=False):
+    """Build missing/stale races of one regatta and write its index."""
+    with LOCK:
+        reg = load_registry()
+        rg = find_regatta(reg, rid)
+        if rg is None:
+            return None
+        index = []
+        for race in rg["races"]:
+            err = build_race_cached(rid, race, force=rebuild)
+            cpath = race_cache_path(rid, race["id"])
+            if err or not os.path.exists(cpath):
+                if err:
+                    print(f"  ! {race['name']}: {err}", flush=True)
                 continue
-            with open(cpath, "w", encoding="utf-8") as fh:
-                json.dump(data, fh, separators=(",", ":"))
-        # read minimal header for the index
-        with open(cpath, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        # regatta trends: per-boat mini-summary + finisher medians + finish rank
-        import statistics as _st
-        fin = [b for b in data["boats"] if b["summary"].get("finished")]
-        def _med(k):
-            vals = [b["summary"][k] for b in fin if b["summary"].get(k) is not None]
-            return round(_st.median(vals), 2) if vals else None
-        keys = ("race_min", "sog_up", "sog_dn", "vmg_up", "vmg_dn", "twa_up",
-                "tack_loss", "gybe_loss", "dist_nm", "n_tacks", "n_gybes")
-        fleet = {k: _med(k) for k in keys}
-        order = sorted([b for b in fin if b["summary"].get("race_min") is not None],
-                       key=lambda b: b["summary"]["race_min"])
-        rank = {b["sail"]: j + 1 for j, b in enumerate(order)}
-        mini = {}
-        for b in data["boats"]:
-            s = b["summary"]
-            mini[b["sail"]] = {**{k: s.get(k) for k in keys},
-                               "finished": s.get("finished"),
-                               "rank": rank.get(b["sail"]), "n_fin": len(order)}
-        index.append({"i": i, "race": data["race"], "start_iso": data["start_iso"],
-                      "wind_from": data["wind_from"], "n_boats": len(data["boats"]),
-                      "fleet": fleet, "boats": mini})
-    with open(os.path.join(CACHE_DIR, "index.json"), "w", encoding="utf-8") as fh:
-        json.dump(index, fh)
-    return index
+            with open(cpath, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            index.append(index_entry(len(index), race["id"], data))
+        os.makedirs(os.path.join(CACHE_DIR, rid), exist_ok=True)
+        with open(os.path.join(CACHE_DIR, rid, "index.json"), "w", encoding="utf-8") as fh:
+            json.dump(index, fh)
+        return index
+
+
+def index_entry(i, race_id, data):
+    """Regatta trends: per-boat mini-summary + finisher medians + finish rank."""
+    import statistics as _st
+    fin = [b for b in data["boats"] if b["summary"].get("finished")]
+    def _med(k):
+        vals = [b["summary"][k] for b in fin if b["summary"].get(k) is not None]
+        return round(_st.median(vals), 2) if vals else None
+    keys = ("race_min", "sog_up", "sog_dn", "vmg_up", "vmg_dn", "twa_up",
+            "tack_loss", "gybe_loss", "dist_nm", "n_tacks", "n_gybes")
+    fleet = {k: _med(k) for k in keys}
+    order = sorted([b for b in fin if b["summary"].get("race_min") is not None],
+                   key=lambda b: b["summary"]["race_min"])
+    rank = {b["sail"]: j + 1 for j, b in enumerate(order)}
+    mini = {}
+    for b in data["boats"]:
+        s = b["summary"]
+        mini[b["sail"]] = {**{k: s.get(k) for k in keys},
+                           "finished": s.get("finished"),
+                           "rank": rank.get(b["sail"]), "n_fin": len(order)}
+    return {"i": i, "id": race_id, "race": data["race"], "start_iso": data["start_iso"],
+            "wind_from": data["wind_from"], "n_boats": len(data["boats"]),
+            "fleet": fleet, "boats": mini}
+
+
+def registry_view():
+    reg = load_registry()
+    out = []
+    for rg in reg["regattas"]:
+        races = []
+        for r in rg["races"]:
+            races.append({"id": r["id"], "name": r["name"], "course": r["course"], "gun": r.get("gun"),
+                          "n_files": len(kml_files(r)), "uploaded": is_upload_dir(race_dir_abs(r)),
+                          "analysed": os.path.exists(race_cache_path(rg["id"], r["id"]))})
+        out.append({"id": rg["id"], "name": rg["name"], "races": races})
+    return {"regattas": out, "templates": [{**t, "course": parse_legs(t["legs"])} for t in TEMPLATES]}
 
 
 # --------------------------------------------------------------------------- #
@@ -358,26 +566,160 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
+    def _json(self, obj, code=200):
+        self._send(code, json.dumps(obj, ensure_ascii=False), "application/json; charset=utf-8")
+
+    def _err(self, msg, code=400):
+        self._json({"ok": False, "error": msg}, code)
+
     def do_GET(self):
-        path = self.path.split("?")[0]
+        path = urlparse(self.path).path
         if path == "/" or path == "/index.html":
             return self._file(os.path.join(STATIC_DIR, "index.html"), "text/html; charset=utf-8")
         if path.startswith("/static/"):
-            fp = os.path.join(STATIC_DIR, path[len("/static/"):])
+            fp = os.path.join(STATIC_DIR, os.path.basename(path))
             ctype = ("text/css" if fp.endswith(".css")
                      else "application/javascript" if fp.endswith(".js")
                      else "application/octet-stream")
             return self._file(fp, ctype)
-        if path == "/api/index":
-            return self._file(os.path.join(CACHE_DIR, "index.json"), "application/json")
-        m = re.match(r"/api/race/(\d+)$", path)
+        if path == "/api/regattas":
+            return self._json(registry_view())
+        m = re.fullmatch(r"/api/index/([a-z0-9-]+)", path)
         if m:
-            return self._file(os.path.join(CACHE_DIR, f"race_{int(m.group(1))}.json"),
-                              "application/json")
+            idx = ensure_cache(m.group(1))
+            return self._json(idx) if idx is not None else self._err("unknown regatta", 404)
+        m = re.fullmatch(r"/api/race/([a-z0-9-]+)/([a-z0-9-]+)", path)
+        if m:
+            return self._file(race_cache_path(m.group(1), m.group(2)), "application/json")
         self._send(404, "not found", "text/plain")
+
+    def _body(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > 64 * 1024 * 1024:
+            raise ValueError("File too large (max 64 MB).")
+        return self.rfile.read(n) if n else b""
+
+    def do_POST(self):
+        u = urlparse(self.path)
+        parts = [p for p in u.path.split("/") if p]
+        try:
+            raw = self._body()
+            if parts[:2] != ["api", "regatta"] and parts != ["api", "regattas"]:
+                return self._err("not found", 404)
+            if parts[-1] == "file":                       # raw KML upload
+                return self._upload(parts, parse_qs(u.query).get("name", [""])[0], raw)
+            body = json.loads(raw.decode("utf-8") or "{}")
+            with LOCK:
+                return self._route(parts, body)
+        except ValueError as e:
+            return self._err(str(e))
+
+    def _route(self, parts, body):
+        reg = load_registry()
+        if parts == ["api", "regattas"]:                                   # create regatta
+            name = str(body.get("name", "")).strip()[:80]
+            if not name:
+                raise ValueError("Give the regatta a name.")
+            rid, k = _slug(name), 2
+            while find_regatta(reg, rid):
+                rid, k = f"{_slug(name)}-{k}", k + 1
+            reg["regattas"].append({"id": rid, "name": name, "races": []})
+            save_registry(reg)
+            return self._json({"ok": True, "id": rid})
+        rid = parts[2] if len(parts) > 2 else ""
+        rg = find_regatta(reg, rid) if _safe_id(rid) else None
+        if rg is None:
+            return self._err("unknown regatta", 404)
+        if parts[3:] == ["rename"]:
+            name = str(body.get("name", "")).strip()[:80]
+            if not name:
+                raise ValueError("Give the regatta a name.")
+            rg["name"] = name
+            save_registry(reg)
+            return self._json({"ok": True})
+        if parts[3:] == ["delete"]:
+            reg["regattas"] = [g for g in reg["regattas"] if g["id"] != rid]
+            save_registry(reg)
+            for d in (os.path.join(UPLOAD_DIR, rid), os.path.join(CACHE_DIR, rid)):
+                shutil.rmtree(d, ignore_errors=True)       # app-made copies/caches only
+            return self._json({"ok": True})
+        if parts[3:] == ["races"]:                                         # create race
+            name = str(body.get("name", "")).strip()[:60] or f"Race {len(rg['races']) + 1}"
+            ids = {r["id"] for r in rg["races"]}
+            k = len(rg["races"]) + 1
+            while f"r{k:02d}" in ids:
+                k += 1
+            race_id = f"r{k:02d}"
+            d = upload_dir_for(rid, race_id)
+            os.makedirs(d, exist_ok=True)
+            rg["races"].append({"id": race_id, "name": name,
+                                "dir": os.path.relpath(d, HERE).replace("\\", "/"),
+                                "course": normalize_course(body.get("course")),
+                                "gun": normalize_gun(body.get("gun")), "key": f"{rid}/{race_id}"})
+            save_registry(reg)
+            return self._json({"ok": True, "id": race_id})
+        race = find_race(rg, parts[4]) if len(parts) > 5 and parts[3] == "race" else None
+        if race is None:
+            return self._err("unknown race", 404)
+        action = parts[5]
+        if action == "update":
+            race["name"] = str(body.get("name", race["name"])).strip()[:60] or race["name"]
+            race["course"] = normalize_course(body.get("course"))
+            race["gun"] = normalize_gun(body.get("gun"))
+            save_registry(reg)
+            return self._json({"ok": True})
+        if action == "clear":                     # start a fresh set of uploaded tracks
+            d = upload_dir_for(rid, race["id"])
+            if os.path.isdir(d):
+                for f in glob.glob(os.path.join(d, "*.kml")):
+                    os.remove(f)                  # only the app's own uploaded copies
+            os.makedirs(d, exist_ok=True)
+            race["dir"] = os.path.relpath(d, HERE).replace("\\", "/")
+            save_registry(reg)
+            return self._json({"ok": True})
+        if action == "build":
+            err = build_race_cached(rid, race, force=False)
+            if err:
+                return self._err(err)
+            idx = ensure_cache(rid)
+            return self._json({"ok": True, "n_races": len(idx or [])})
+        if action == "delete":
+            rg["races"] = [r for r in rg["races"] if r["id"] != race["id"]]
+            save_registry(reg)
+            if is_upload_dir(race_dir_abs(race)):
+                shutil.rmtree(race_dir_abs(race), ignore_errors=True)
+            for f in (race_cache_path(rid, race["id"]), race_cache_path(rid, race["id"])[:-5] + ".meta.json"):
+                if os.path.exists(f):
+                    os.remove(f)
+            ensure_cache(rid)
+            return self._json({"ok": True})
+        return self._err("not found", 404)
+
+    def _upload(self, parts, name, raw):
+        if len(parts) != 6 or parts[3] != "race":
+            return self._err("not found", 404)
+        name = os.path.basename(name.replace("\\", "/"))
+        if not name.lower().endswith(".kml") or name.startswith("."):
+            raise ValueError(f"Not a .kml file: {name}")
+        if b"<kml" not in raw[:2000].lower() and b"<placemark" not in raw[:20000].lower():
+            raise ValueError(f"{name} does not look like a KML file.")
+        with LOCK:
+            reg = load_registry()
+            rg = find_regatta(reg, parts[2]) if _safe_id(parts[2]) else None
+            race = find_race(rg, parts[4]) if rg else None
+            if race is None:
+                return self._err("unknown race", 404)
+            d = race_dir_abs(race)
+            if not is_upload_dir(d):
+                raise ValueError("Clear the race's tracks before uploading new ones.")
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, name), "wb") as fh:
+                fh.write(raw)
+        return self._json({"ok": True})
 
     def _file(self, fp, ctype):
         if not os.path.exists(fp):
@@ -387,15 +729,21 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    try:                                          # regatta names may not fit a cp1252 console
+        sys.stdout.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
     rebuild = "--rebuild" in sys.argv
     port = 8765
     if "--port" in sys.argv:
         port = int(sys.argv[sys.argv.index("--port") + 1])
 
-    print(f"Data folder : {DATA_DIR}")
-    print("Building analysis cache (first run parses 441 KML files; ~10-20 s)...")
-    idx = ensure_cache(rebuild=rebuild)
-    print(f"Ready: {len(idx)} races cached.")
+    reg = load_registry()
+    print(f"Regattas    : {', '.join(g['name'] for g in reg['regattas']) or '(none yet)'}")
+    print("Building analysis cache (first run parses the KML files; ~10-20 s per regatta)...")
+    for rg in reg["regattas"]:
+        idx = ensure_cache(rg["id"], rebuild=rebuild)
+        print(f"Ready: {rg['name']} — {len(idx or [])} races cached.")
 
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}/"
