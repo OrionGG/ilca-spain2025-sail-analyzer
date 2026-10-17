@@ -904,9 +904,12 @@ function tabPosition(body){
     for(const o of pool){ if(o===boat) continue; const oT=roundT(o,i);
       if(oT!=null && oT<myT) rk2++; }
     return rk2; };
-  let mt=`<table><tr><th>Boat</th>${Array.from({length:NL},(_,i)=>`<th>${esc(legMarkLabel(i))}</th>`).join('')}</tr>`;
+  const lastCols={}; for(const o of pool) if(o.summary.finished){ const c=courseIdx(o,boatLegs(o).length-1); lastCols[c]=(lastCols[c]||0)+1; }
+  const finCol=Object.keys(lastCols).length?+Object.entries(lastCols).sort((a,b)=>b[1]-a[1])[0][0]:-1;
+  const colLabel=i=>legMarkLabel(i)+(i===finCol&&i<courseLegs().length-1?' (finish)':'');
+  let mt=`<table><tr><th>Boat</th>${Array.from({length:NL},(_,i)=>`<th>${esc(colLabel(i))}</th>`).join('')}</tr>`;
   const rowFor=(boat,color)=>{ let prev=null, tds='';
-    for(let i=0;i<NL;i++){ const rk2=isLastFor(boat,i)?dbFinishRank(boat,pool):rankAtLeg(boat,i);   // last leg: finish line
+    for(let i=0;i<NL;i++){ const rk2=finishesAt(boat,i)?dbFinishRank(boat,pool):rankAtLeg(boat,i);   // finish line
       const d=(rk2!=null&&prev!=null)?rk2-prev:null; if(rk2!=null)prev=rk2;
       const badge=d==null||d===0?'':` <span class="${d<0?'good':'bad'}" style="font-size:10px">${d<0?'+'+(-d):'−'+d}</span>`;
       tds+=`<td>${rk2==null?'–':'P'+rk2}${badge}</td>`; }
@@ -1018,18 +1021,22 @@ const pctl=(a,p)=>{ a=a.filter(v=>v!=null&&isFinite(v)).sort((x,y)=>x-y); return
 const mmss=t=>fmtT(t-S.tMin);
 const plur=(n,w)=>`${n} ${w}${n===1?'':'s'}`;
 function dbPool(){ const p=finishers().slice(); for(const b of [focusB(),partnerB()]) if(b&&!p.includes(b)) p.push(b); return p; }
+// course leg index -> boat leg index (cached per legs array; rebuilt after mark edits)
+function ciMap(b){ const lg=boatLegs(b); if(b._cim&&b._cimRef===lg) return b._cim;
+  const m={}; lg.forEach((_,li)=>{ const ci=courseIdx(b,li); if(ci>=0&&!(ci in m)) m[ci]=li; });
+  b._cim=m; b._cimRef=lg; return m; }
 // Rounding time of course leg ci's mark for boat b (null if b never sailed that leg).
-function dbRoundT(b,ci){ if(ci==null||ci<0) return null; const lg=boatLegs(b);
-  for(let li=0;li<lg.length;li++) if(courseIdx(b,li)===ci){
-    const rr=b._mlegs?null:b.rounds; return rr&&rr[li]!=null?rr[li]:b.t[lg[li][1]]; }
-  return null; }
+function dbRoundT(b,ci){ if(ci==null||ci<0) return null; const li=ciMap(b)[ci]; if(li==null) return null;
+  const rr=b._mlegs?null:b.rounds; return rr&&rr[li]!=null?rr[li]:b.t[boatLegs(b)[li][1]]; }
 function isLastFor(b,ci){ const lg=boatLegs(b); return lg.length>0 && courseIdx(b,lg.length-1)===ci; }
+// b crossed the finish line at the end of course leg ci (retirees never "finish")
+function finishesAt(b,ci){ return !!b.summary.finished && isLastFor(b,ci); }
 function dbRankAtMark(b,i,pl){ const my=dbRoundT(b,i); if(my==null) return null; let r=1;
   for(const o of pl){ if(o===b) continue; const ot=dbRoundT(o,i); if(ot!=null&&ot<my) r++; } return r; }
 function dbRankAtT(b,t,pl){ const k=gk(t), my=boatCourse(b)[k]; if(my==null) return null; let r=1;
   for(const o of pl){ if(o===b) continue; const v=boatCourse(o)[k]; if(v!=null&&v>my) r++; } return r; }
-function dbFinishRank(b,pl){ const rt=b.summary.race_min; if(rt==null) return null; let r=1;
-  for(const o of pl){ if(o!==b&&o.summary.race_min!=null&&o.summary.race_min<rt) r++; } return r; }
+function dbFinishRank(b,pl){ const rt=b.summary.race_min; if(rt==null||!b.summary.finished) return null; let r=1;
+  for(const o of pl){ if(o!==b&&o.summary.finished&&o.summary.race_min!=null&&o.summary.race_min<rt) r++; } return r; }
 function windVecs(t){ const w=windAtT(t)*Math.PI/180;           // u = upwind, l = right looking upwind
   return {u:[Math.sin(w),Math.cos(w)], l:[Math.cos(w),-Math.sin(w)]}; }
 function countIn(arr,t0,t1,kind){ return (arr||[]).filter(m=>m.t>=t0&&m.t<=t1&&(!kind||m.kind===kind)).length; }
@@ -1129,11 +1136,11 @@ function debriefChecks(b){
     const ci=courseIdx(b,li), cp=li>0?courseIdx(b,li-1):-1;          // course legs (this / previous)
     const tA=li===0?gun:dbRoundT(b,cp), tB=dbRoundT(b,ci); if(tA==null||tB==null||tB<=tA) return;
     const isLast=li===legs.length-1;
-    const endRank=o=>isLastFor(o,ci)?dbFinishRank(o,pl):dbRankAtMark(o,ci,pl);
+    const endRank=o=>finishesAt(o,ci)?dbFinishRank(o,pl):dbRankAtMark(o,ci,pl);
     const r0=li===0?dbRankAtT(b,gun+120,pl):dbRankAtMark(b,cp,pl), r1=endRank(b);
     const dPl=(r0!=null&&r1!=null)?r0-r1:null;                       // + = places gained
     const win=o=>[li===0?gun:dbRoundT(o,cp),
-      (isLastFor(o,ci)&&o.summary.race_min!=null)?gun+o.summary.race_min*60:dbRoundT(o,ci)];
+      (finishesAt(o,ci)&&o.summary.race_min!=null)?gun+o.summary.race_min*60:dbRoundT(o,ci)];
     const PH=kind==='upwind'?(++beatNo===1?'First beat':beatNo===2?'Second beat':`Beat ${beatNo}`):
              kind==='downwind'?(++runNo===1?'First run':`Run ${runNo}`):`Reach (leg ${li+1})`;
     if(dPl!=null) add(PH, dPl>=3?'good':dPl<=-3?'bad':'info', 'Places on the leg',
@@ -1347,14 +1354,17 @@ async function loadRegattas(rid, raceId){
   await loadIndex(rid, raceId);
 }
 async function loadIndex(rid, raceId){
+  const tok=S._ixTok=(S._ixTok||0)+1; S._rcTok=(S._rcTok||0)+1;   // newer selections win
   setBusy('Loading races… (the first open after an update analyses the tracks, ~10–30 s)');
   let idx;
   try{ const r=await fetch('/api/index/'+rid); idx=await r.json().catch(()=>null);
     if(!r.ok||!Array.isArray(idx)) throw new Error((idx&&idx.error)||('HTTP '+r.status)); }
-  catch(e){ setBusy('Could not load that regatta: '+e.message); setTimeout(()=>setBusy(null),5000);
+  catch(e){ if(tok!==S._ixTok) return;
+    setBusy('Could not load that regatta: '+e.message); setTimeout(()=>setBusy(null),5000);
     $('#regSel').value=S.regatta||''; return; }
+  if(tok!==S._ixTok) return;
   setBusy(null);
-  S.regatta=rid; try{ localStorage.setItem('sa_regatta',rid); }catch(e){}
+  S.regatta=rid; $('#regSel').value=rid; try{ localStorage.setItem('sa_regatta',rid); }catch(e){}
   const g=S.regattas.find(x=>x.id===rid);
   $('#regTitle').textContent=g?g.name:''; document.title='Sail Analyzer — '+(g?g.name:'');
   S.index=idx;
@@ -1376,9 +1386,11 @@ function showEmpty(){
 }
 function setBusy(msg){ const el=$('#busy'); if(!el) return; el.textContent=msg||''; el.style.display=msg?'':'none'; }
 async function loadRace(i){
+  const tok=S._rcTok=(S._rcTok||0)+1;
   setPlaying(false);
   let race=null;
   try{ const r=await fetch('/api/race/'+S.regatta+'/'+S.index[i].id); if(r.ok) race=await r.json(); }catch(e){}
+  if(tok!==S._rcTok) return;
   if(!race){ setBusy('Could not load that race — reopen the regatta to refresh the list.');
     setTimeout(()=>setBusy(null),5000); $('#raceSel').value=S.raceIdx; return; }
   S.raceIdx=i; S.race=race;

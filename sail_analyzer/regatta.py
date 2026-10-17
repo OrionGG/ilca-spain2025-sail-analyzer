@@ -474,16 +474,19 @@ def detect_gun(boats, wind_from):
     return float(round(gun / 60.0) * 60.0)               # snap to the clock minute
 
 
-def segment_legs(b: Boat, wind_from, template=("U", "R", "D", "U", "D", "R"), gun_t=None):
+def segment_legs(b: Boat, wind_from, template=("U", "R", "D", "U", "D", "R"), gun_t=None,
+                 with_index=False):
     """
     Split the race into the legs of the race's course by fitting the template's
     leg-type sequence (U/R/D, e.g. the trapezoid U,R,D,U,D,R) to the track with
     dynamic programming. Leg 1 is anchored at the gun (`gun_t`) so the pre-start
     is excluded; the DP labels the legs and a free trailing segment drops
     post-finish sailing, so shortened races (fewer legs) fall out on their own.
+    `with_index=True` also returns each leg's template index (None for the
+    template-free fallback split).
     """
     if b.vmg is None or len(b.t) < 30:
-        return []
+        return ([], []) if with_index else []
     tmpl = [_MODE[c] for c in template]
     K = len(tmpl)
     n = len(b.t)
@@ -516,11 +519,12 @@ def segment_legs(b: Boat, wind_from, template=("U", "R", "D", "U", "D", "R"), gu
     for k in range(K - 1, -1, -1):
         bounds[k] = back[k][bounds[k + 1]]
 
-    legs = []
+    legs, ks = [], []
     for k in range(K):
         a, c = bounds[k], bounds[k + 1]
         if c - a >= 2:
             legs.append((a, min(c, n - 1), _KIND[tmpl[k]]))
+            ks.append(k)
 
     # Trim the final leg at peak progress along its own axis: after the finish a
     # boat turns back (to shore / milling), so projection onto the leg direction
@@ -537,13 +541,15 @@ def segment_legs(b: Boat, wind_from, template=("U", "R", "D", "U", "D", "R"), gu
                 cmax = a + int(np.argmax(proj))
                 if a + 2 <= cmax < c:
                     legs[-1] = (a, cmax, kind)
-    return legs if len(legs) >= 2 else _segment_legs_vmg(b)
+    if len(legs) < 2:
+        legs, ks = _segment_legs_vmg(b), None
+    return (legs, ks) if with_index else legs
 
 
 def course_index(course, legs):
-    """Course leg index for each of a boat's legs: its n-th leg of a type ends at
-    the course's n-th leg of that type, so a dropped or extra leg in one track
-    doesn't shift its later legs (None where the course has no such leg)."""
+    """Course leg index for each of a boat's legs when the split didn't come from
+    the course template (fallback): its n-th leg of a type is the course's n-th
+    leg of that type (None where the course has no such leg)."""
     pos, seen = {}, {}
     for ci, leg in enumerate(course):
         pos[(leg["type"], seen.get(leg["type"], 0))] = ci
@@ -606,14 +612,14 @@ def _split_gate(pts):
     return [gm] if gm else []
 
 
-def detect_marks(boats, wind_from, legs_by_sail, course):
+def detect_marks(boats, wind_from, legs_by_sail, course, cix_by_sail=None):
     """
     Locate the course marks at the fleet's actual rounding points, driven by the
     race's course definition: a list of legs {"type": U|R|D, "mark": label,
     "gate": bool}, each ending at its mark; the last leg ends at the finish.
 
-    Each boat's legs are matched to the course with `course_index`, so a dropped
-    or extra leg in one track doesn't shift the others. Candidate rounding points per boat: the
+    Each boat's legs are matched to course legs by `cix_by_sail` (template
+    indices from `segment_legs`; `course_index` when missing). Candidate rounding points per boat: the
     furthest-upwind point of a beat / furthest-downwind point of a run, and the
     turn apex at the leg end. Per mark the candidate the fleet's tracks pass
     closest to wins (beats into the top mark favour the furthest-upwind point,
@@ -639,7 +645,8 @@ def detect_marks(boats, wind_from, legs_by_sail, course):
         if b.x is None or not legs:
             continue
         p = b.x * ux + b.y * uy
-        for li, ci in enumerate(course_index(course, legs)):
+        cix = (cix_by_sail or {}).get(b.sail)
+        for li, ci in enumerate(cix if cix is not None else course_index(course, legs)):
             if ci is None or ci >= K - 1:             # unmatched leg / the finish leg
                 continue
             a, c, _ = legs[li]
