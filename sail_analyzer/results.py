@@ -44,12 +44,13 @@ _VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "me
 
 class _Tables(HTMLParser):
     """Collects every <table> as rows of cell texts, skipping display:none content
-    (Sailti puts sort keys in hidden spans) and keeping <br> as a space."""
+    (Sailti puts sort keys in hidden spans), keeping <br> as a space and expanding
+    colspan. Row/cell state is per table, so a table nested in a cell can't break
+    the outer row; end tags may be omitted (the next row/cell start closes them)."""
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.tables, self._stack, self._open = [], [], []     # _open: [(tag, hidden)]
-        self._row, self._cell, self._in_head = None, None, False
 
     def _is_hidden(self):
         return bool(self._open) and self._open[-1][1]
@@ -63,48 +64,56 @@ class _Tables(HTMLParser):
         if tag not in _VOID:
             self._open.append((tag, hidden or self._is_hidden()))
         if tag == "table":
-            self._stack.append({"head": [], "rows": []})
-        elif not self._stack:
+            self._stack.append({"head": [], "rows": [], "row": None, "cell": None, "th": False, "span": 1})
             return
-        elif tag == "tr":
-            self._flush_cell()
-            self._flush_row()
-            self._row = []
-        elif tag in ("td", "th") and self._row is not None:
-            self._flush_cell()
-            self._cell = []
-            self._in_head = tag == "th"
-        elif tag == "br" and self._cell is not None:
-            self._cell.append(" ")
+        if not self._stack:
+            return
+        t = self._stack[-1]
+        if tag == "tr":
+            self._flush_cell(t)
+            self._flush_row(t)
+            t["row"] = []
+        elif tag in ("td", "th") and t["row"] is not None:
+            self._flush_cell(t)
+            t["cell"], t["th"] = [], tag == "th"
+            try:
+                t["span"] = max(1, min(50, int(a.get("colspan") or 1)))
+            except ValueError:
+                t["span"] = 1
+        elif tag == "br" and t["cell"] is not None:
+            t["cell"].append(" ")
 
-    def _flush_cell(self):
-        if self._cell is not None and self._row is not None:
-            self._row.append((re.sub(r"\s+", " ", "".join(self._cell)).strip(), self._in_head))
-        self._cell = None
+    @staticmethod
+    def _flush_cell(t):
+        if t["cell"] is not None and t["row"] is not None:
+            text = re.sub(r"\s+", " ", "".join(t["cell"])).strip()
+            t["row"].extend([(text, t["th"])] + [("", t["th"])] * (t["span"] - 1))
+        t["cell"] = None
 
-    def _flush_row(self):
-        if self._row and self._stack:
-            t = self._stack[-1]
-            (t["head"] if all(h for _, h in self._row) else t["rows"]).append([c for c, _ in self._row])
-        self._row = None
+    @staticmethod
+    def _flush_row(t):
+        if t["row"]:
+            (t["head"] if all(h for _, h in t["row"]) else t["rows"]).append([c for c, _ in t["row"]])
+        t["row"] = None
 
     def handle_endtag(self, tag):
-        if any(t == tag for t, _h in self._open):     # pop back to the matching open tag
+        if any(o == tag for o, _h in self._open):     # pop back to the matching open tag
             while self._open and self._open.pop()[0] != tag:
                 pass
         if not self._stack:
             return
+        t = self._stack[-1]
         if tag in ("td", "th"):
-            self._flush_cell()
+            self._flush_cell(t)
         elif tag in ("tr", "thead", "tbody", "table"):     # a row may be left unclosed
-            self._flush_cell()
-            self._flush_row()
+            self._flush_cell(t)
+            self._flush_row(t)
             if tag == "table":
                 self.tables.append(self._stack.pop())
 
     def handle_data(self, data):
-        if self._cell is not None and not self._is_hidden():
-            self._cell.append(data)
+        if self._stack and self._stack[-1]["cell"] is not None and not self._is_hidden():
+            self._stack[-1]["cell"].append(data)
 
 
 def _split_rows(html: str):
@@ -139,11 +148,8 @@ def _score(cell: str):
     return {"pts": pts, "code": code.group(1) if code else None, "disc": "(" in (cell or "")}
 
 
-def _parse_table(t):
-    head = t["head"][0] if t["head"] else (t["rows"][0] if t["rows"] else [])
-    rows = t["rows"] if t["head"] else t["rows"][1:]
-    col = {}
-    races = []
+def _columns(head):
+    col, races = {}, []
     for i, h in enumerate(head):
         for k, rx in _HEAD.items():
             if k not in col and rx.match(h.strip()):
@@ -151,13 +157,31 @@ def _parse_table(t):
         m = _RACE.match(h.strip())
         if m:
             races.append((i, re.sub(r"\s+", "", h.strip()).upper() if m.group(1) else m.group(2)))
-    if "sail" not in col or not races:
+    return col, races
+
+
+def _parse_table(t):
+    # the header row is the one naming the sail and race columns (pages may add grouping rows
+    # above it, or use <td> for the header)
+    cands = [(h, t["rows"]) for h in t["head"]] + [(t["rows"][i], t["rows"][i + 1:]) for i in range(min(3, len(t["rows"])))]
+    for head, rows in cands:
+        col, races = _columns(head)
+        if "sail" in col and races:
+            break
+    else:
         return None
     out = []
     for r in rows:
         if len(r) <= max(i for i, _ in races):
             continue
-        cell = lambda k: r[col[k]] if k in col and col[k] < len(r) else ""
+        def cell(k):                               # text across the header's colspan (e.g. flag + number)
+            if k not in col:
+                return ""
+            i = col[k]
+            j = i + 1
+            while j < len(head) and not head[j].strip():
+                j += 1
+            return " ".join(x for x in r[i:j] if x).strip()
         sail_raw = cell("sail")
         digits = max(re.findall(r"\d+", sail_raw), key=len, default="")
         if not digits:

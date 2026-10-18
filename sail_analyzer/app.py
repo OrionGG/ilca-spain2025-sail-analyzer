@@ -339,7 +339,8 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
             # sanity: a real line is crossed no later than the previous estimate (which runs late,
             # to the leg end); a course shortened at its last mark would put a "line" in
             # post-finish sailing, i.e. clearly later
-            dt = [t - finish_t[s] for s, t in (conv or {}).get("times", {}).items() if s in finish_t]
+            dt = [t - finish_t[s] for s, t in (conv or {}).get("times", {}).items()
+                  if s in finish_t and cix_by_sail[s] and cix_by_sail[s][-1] == fin_ci]
             if conv and dt and float(np.median(dt)) <= 60.0:
                 for b in boats:
                     lg, ft = legs_by_sail[b.sail], conv["times"].get(b.sail)
