@@ -740,8 +740,8 @@ def detect_finish(boats, legs_by_sail, need=3):
 def _split_gate(pts, need=3, min_sep=15.0, sharp=2.8):
     """Gate buoys from (lat, lon, crosswind) rounding points: two buoys when the
     cross-wind positions form two clear groups, else one. A group needs >= 15% of the
-    roundings, so strays (fewer than that, beyond a 30 m gap at either end) are dropped
-    first. The best two-way split (least within-group variance) counts when its group
+    roundings (at least 3), so strays (fewer than that, beyond a 30 m gap at either end)
+    are dropped first, when enough roundings remain for two groups. The best two-way split (least within-group variance) counts when its group
     medians are >= min_sep m apart and >= `sharp` x the groups' spread (IQR): one
     buoy's roundings split that way give ~2 (p99 ~3); a 40 m ILCA gate gives 3-7."""
     if len(pts) < 6:
@@ -754,8 +754,9 @@ def _split_gate(pts, need=3, min_sep=15.0, sharp=2.8):
     gaps = np.diff(cw)
     i0 = max([t for t in range(1, m) if gaps[t - 1] >= 30.0], default=0)
     i1 = n - max([t for t in range(1, m) if gaps[n - 1 - t] >= 30.0], default=0)
-    pts, cw = pts[i0:i1], cw[i0:i1]
-    n = len(cw)
+    if i1 - i0 >= 2 * m:
+        pts, cw = pts[i0:i1], cw[i0:i1]
+        n = len(cw)
     best = None
     for k in range(m, n - m + 1):
         w = k * cw[:k].var() + (n - k) * cw[k:].var()
