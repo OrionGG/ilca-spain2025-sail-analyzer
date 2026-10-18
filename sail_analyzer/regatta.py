@@ -654,16 +654,26 @@ def finish_by_convergence(boats, starts, origin, target, ref, step=5.0, max_spre
     n_ref = sum(1 for s in tracks if s in ref)
     if n_ref < 3:
         return None
+    def width(s, need):
+        lat = [c[int(np.argmax(a >= s))] for sail, (_t, a, c) in tracks.items() if sail in ref and a.max() >= s]
+        return (lat, np.percentile(lat, [5, 10, 90, 95])) if len(lat) >= need else (lat, None)
+
     best, widths = None, []
     for s in np.arange(max(100.0, 0.3 * D), D + 400.0, step):
-        lat = [c[int(np.argmax(a >= s))] for sail, (_t, a, c) in tracks.items() if sail in ref and a.max() >= s]
-        if len(lat) < max(3, min_reach * n_ref):
+        _lat, q = width(s, max(3, min_reach * n_ref))
+        if q is None:
             continue
-        lo, p10, p90, hi = np.percentile(lat, [5, 10, 90, 95])
+        lo, p10, p90, hi = q
         widths.append(p90 - p10)
         if best is None or p90 - p10 < best[1]:
             best = (s, p90 - p10, lo, hi)
     if best is None or best[1] > max_spread or best[1] > funnel * float(np.median(widths)):
+        return None
+    # after the line the finishers spread out again (they stop racing); a single-file stretch
+    # of the leg doesn't. Checked only while most of them are still tracked there.
+    after = [width(best[0] + d, max(3, 0.5 * n_ref))[1] for d in (50.0, 100.0, 150.0)]
+    after = [q[2] - q[1] for q in after if q is not None]
+    if after and max(after) < 1.5 * max(best[1], 5.0):
         return None
     s, _w, lo, hi = best
     times = {}

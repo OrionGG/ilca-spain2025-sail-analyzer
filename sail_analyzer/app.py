@@ -346,13 +346,14 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
                 for b in boats:
                     if b.sail not in gps_finish:
                         continue
-                    finished[b.sail] = True               # crossed the finish line after the last mark
                     lg, ft = legs_by_sail[b.sail], conv["times"][b.sail]
                     if not lg:
                         continue
                     a, c, k = lg[-1]                  # the last leg (and race window) ends at the line
                     idx = max(a + 1, min(int(np.searchsorted(b.t, ft)), len(b.t) - 1))
                     on_final = bool(cix_by_sail[b.sail]) and cix_by_sail[b.sail][-1] == fin_ci
+                    if on_final:
+                        finished[b.sail] = True       # sailed the final leg and crossed the line
                     if on_final or idx < c:
                         legs_by_sail[b.sail] = lg[:-1] + [(a, idx, k)]
                     if on_final:

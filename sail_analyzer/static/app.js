@@ -181,7 +181,7 @@ function courseFromLegs(b,legs){      // cumulative made-good along each leg axi
     return course[i]+(course[j]-course[i])*f; });
 }
 function applyManualMarks(){
-  const on=marksOverridden();
+  const on=marksOverridden(); if(S.race) S.race._finCi=null;
   for(const b of S.race.boats){
     if(on){ const lg=legsFromMarks(b); b._mlegs=lg; b._mcourse=lg?courseFromLegs(b,lg):null; }
     else { b._mlegs=null; b._mcourse=null; }
@@ -523,6 +523,9 @@ function officialFor(sail, raceId){ const R=S.results; if(!R||sail==null) return
   const col=raceId==null?-1:R.map.indexOf(raceId); return row&&col>=0?row.scores[col]:null; }
 function curRaceId(){ return S.index&&S.index[S.raceIdx]?S.index[S.raceIdx].id:null; }
 function officialScore(b){ return b?officialFor(b.sail, curRaceId()):null; }
+// codes for boats that did not finish / were removed; other codes (ZFP, SCP, DPI, RDG...) finished
+const NO_FINISH=new Set(['DNC','DNS','OCS','UFD','BFD','DNF','RET','DSQ','DNE','DGM','NSC','RAF']);
+const noFinish=s=>!!(s&&s.code&&NO_FINISH.has(s.code));
 function officialPlace(b){ const s=officialScore(b); return s&&!s.code&&s.pts!=null?Math.round(s.pts):null; }
 function officialPlaceBySail(sail, raceId){ const s=officialFor(sail, raceId); return s&&!s.code&&s.pts!=null?Math.round(s.pts):null; }
 function scoreText(s){ return s?(s.code?s.code:'P'+Math.round(s.pts)):'–'; }
@@ -594,7 +597,7 @@ function keyFindings(body){
   let head;
   const op=officialPlace(f), offN=S.results?S.results.rows.filter(r=>{ const sc=officialFor(r.sail,curRaceId()); return sc&&!sc.code; }).length:0;
   const hr=op??rank, hn=op!=null?offN:n;
-  if(osc&&osc.code) head = `Scored ${osc.code} in the official results`+(weak.length?` — GPS also points to ${weak[0]}.`:'.');
+  if(noFinish(osc)) head = `Scored ${osc.code} in the official results`+(weak.length?` — GPS also points to ${weak[0]}.`:'.');
   else if(hr<=hn/3) head = spd>=0.03?'Strong — fast and well sailed.':'Good result from tactics/shifts/start, not raw speed.';
   else if(hr>=2*hn/3) head = 'Tough race, near the back'+(weak.length?` — cost mainly by ${weak[0]}.`:'.');
   else head = spd>0.05?'Mid-fleet; boatspeed ok, places lost on tactics/start.':'Mid-fleet; small margins.';
@@ -1078,7 +1081,8 @@ function dbRoundT(b,ci){ if(ci==null||ci<0) return null; const li=ciMap(b)[ci]; 
 function isLastFor(b,ci){ const lg=boatLegs(b); return lg.length>0 && courseIdx(b,lg.length-1)===ci; }
 // b crossed the finish line at the end of course leg ci (retirees never "finish")
 function fleetFinCi(){ const r=S.race; if(r._finCi!=null) return r._finCi;
-  const c={}; for(const b of r.boats) if(b.summary.finished&&b.course_ix&&b.course_ix.length){ const x=b.course_ix[b.course_ix.length-1]; c[x]=(c[x]||0)+1; }
+  const c={}; for(const b of r.boats){ const lg=boatLegs(b); if(!b.summary.finished||!lg.length) continue;
+    const x=courseIdx(b,lg.length-1); if(x>=0) c[x]=(c[x]||0)+1; }
   const k=Object.keys(c).sort((x,y)=>c[y]-c[x])[0]; return r._finCi=(k==null?-1:+k); }
 function finishesAt(b,ci){ return (officialPlace(b)!=null || !!b.summary.finished) && isLastFor(b,ci) && ci===fleetFinCi(); }
 function dbRankAtMark(b,i,pl){ const my=dbRoundT(b,i); if(my==null) return null; let r=1;
@@ -1088,7 +1092,7 @@ function dbRankAtT(b,t,pl){ const k=gk(t), my=boatCourse(b)[k]; if(my==null) ret
 function dbFinishRank(b,pl){ const op=officialPlace(b);
   if(op!=null){ let r=1;                           // official order, counted within the same pool as mark ranks
     for(const o of pl){ if(o===b) continue; const p=officialPlace(o); if(p!=null&&p<op) r++; } return r; }
-  if(officialScore(b)) return null;                // official code (DNF, UFD, ...): no place
+  if(noFinish(officialScore(b))) return null;      // official DNF/UFD/DSQ...: no place (ZFP etc. keep the GPS order)
   const rt=b.summary.race_min; if(rt==null||!b.summary.finished) return null; let r=1;
   for(const o of pl){ if(o!==b&&o.summary.finished&&o.summary.race_min!=null&&o.summary.race_min<rt) r++; } return r; }
 function windVecs(t){ const w=windAtT(t)*Math.PI/180;           // u = upwind, l = right looking upwind
@@ -1430,7 +1434,9 @@ async function loadIndex(rid, raceId){
   const g=S.regattas.find(x=>x.id===rid);
   $('#regTitle').textContent=g?g.name:''; document.title='Sail Analyzer — '+(g?g.name:'');
   S.index=idx;
-  try{ S.results=(await api('/api/results/'+rid)).results; }catch(e){ S.results=null; }
+  let res=null; try{ res=(await api('/api/results/'+rid)).results; }catch(e){}
+  if(tok!==S._ixTok) return;                       // a newer regatta selection took over
+  S.results=res;
   const rs=$('#raceSel'); rs.innerHTML='';
   S.index.forEach(r=>{ const o=document.createElement('option'); o.value=r.i;
     o.textContent=r.race+'  ·  wind '+r.wind_from+'°'; rs.appendChild(o); });
