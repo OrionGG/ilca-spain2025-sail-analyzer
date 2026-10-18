@@ -180,9 +180,13 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
     _lc = {}
     for lg in legs_by_sail.values():
         _lc[len(lg)] = _lc.get(len(lg), 0) + 1
-    # tie: the shorter count (boats often keep tracking after finishing, which the DP
-    # labels as an extra leg; retiring is rarer)
-    mode_legs = max(_lc, key=lambda k: (_lc[k], -k)) if _lc else 0
+    # The course length the fleet sailed: the largest leg count held by >= 25% of the
+    # boats (so retirees can't outvote finishers); if the count one below is that common
+    # too, use it: one leg apart is a merged leg or post-finish sailing, not a retirement.
+    common = sorted((c for c in _lc if c > 0 and _lc[c] >= 0.25 * len(legs_by_sail)), reverse=True)
+    mode_legs = common[0] if common else max((c for c in _lc if c > 0), key=_lc.get, default=0)
+    if mode_legs - 1 in common:
+        mode_legs -= 1
     finished = {s: bool(lg) and ks is not None and len(lg) >= mode_legs   # fallback split: no course fit
                 for s, (lg, ks) in seg.items()}
     # course leg of each boat leg: a finisher's DP template index; for a retiree (whose
