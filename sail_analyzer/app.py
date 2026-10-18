@@ -190,8 +190,10 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
                    for s, (lg, ks) in seg.items()}
 
     # course marks at the finishers' actual rounding points, labelled as in the course
-    marks = R.detect_marks([b for b in boats if finished[b.sail]], wind_from, legs_by_sail,
-                           course, cix_by_sail)
+    ref = [b for b in boats if finished[b.sail]]
+    if len(ref) < 3:                              # tiny fleet / no course fit: use every boat
+        ref = boats
+    marks = R.detect_marks(ref, wind_from, legs_by_sail, course, cix_by_sail)
 
     # ---- finish times by LINE CROSSING (not leg end, which drifts minutes) ----
     # Finish line: through the fleet-median last-turn apex, perpendicular to the
@@ -201,7 +203,7 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
     apexes, fdirs = [], []
     for b in boats:
         lg = legs_by_sail[b.sail]
-        if len(lg) != mode_legs or not lg:
+        if not finished[b.sail] or len(lg) != mode_legs:
             continue
         a, c, _ = lg[-1]
         j = R._refine_turn(b, c)                    # sharpest turn ~ the line
@@ -290,9 +292,7 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
 
     # fleet aggregate stats on the grid (FINISHERS only — exclude retirees/DNF)
     sog_grid, vmg_grid = [], []
-    for b in boats:
-        if not finished[b.sail]:
-            continue
+    for b in ref:                                 # finishers (every boat if fewer than 3)
         sog_grid.append(np.interp(grid, b.t, b.sog, left=np.nan, right=np.nan))
         vmg_grid.append(np.interp(grid, b.t, b.vmg, left=np.nan, right=np.nan))
     sog_grid = np.array(sog_grid); vmg_grid = np.array(vmg_grid)
@@ -695,8 +695,10 @@ def analysed(race, tracks_dir):
 
 
 def save_analysed(rid, race, data, cfg):
-    put_race(rid, race["id"], race)
+    """Cache first, registry last: if either write fails the registry still has the old
+    config, and a cache made for a config the registry doesn't have is just stale."""
     store_race_cache(rid, race, data, cfg)
+    put_race(rid, race["id"], race)
 
 
 def analyse(race_dir, race):
@@ -975,6 +977,9 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Could not clear the previous upload (a file is in use) — try again.")
             os.makedirs(st, exist_ok=True)
             return self._json({"ok": True})
+        if action == "unstage":                   # discard the staged copies of a failed save
+            shutil.rmtree(staging_dir_for(rid, race["id"]), ignore_errors=True)
+            return self._json({"ok": True})
         if action == "commit":                    # analyse the staged tracks, then swap them in
             st = staging_dir_for(rid, race["id"])
             if not list_kml(st):
@@ -1037,6 +1042,8 @@ class Handler(BaseHTTPRequestHandler):
                 fh.write(raw)
         except FileExistsError:
             raise ValueError(f"Two tracks named {name}: choose the race's own folder.")
+        except FileNotFoundError:
+            raise ValueError("The upload was restarted by another save — save again.")
         return self._json({"ok": True})
 
     def _file(self, fp, ctype):

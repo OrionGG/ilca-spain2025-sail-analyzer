@@ -158,6 +158,8 @@ async function saveRace(){
     if(fresh){                                 // roll back the race created by this attempt
       try{ await api(`/api/regatta/${rid}/race/${f.id}/delete`, {}); }catch(_){}
       f.mode = 'add'; delete f.id;
+    } else if(f.files.length){                 // drop the uploaded copies of the failed edit
+      try{ await api(`/api/regatta/${rid}/race/${f.id}/unstage`, {}); }catch(_){}
     }
     f.saving = false;
     if(MG.form !== f){ await fetchRegattas(); return; }

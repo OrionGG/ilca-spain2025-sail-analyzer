@@ -563,8 +563,8 @@ def course_index(course, legs):
     return out
 
 
-def _med_xy(pts):
-    if len(pts) < 3:
+def _med_xy(pts, need=3):
+    if len(pts) < need or not pts:
         return None
     P = np.array(pts, float)
     return [float(np.median(P[:, 0])), float(np.median(P[:, 1]))]
@@ -581,22 +581,22 @@ def _refine_turn(b, idx, win=12):
     return bj
 
 
-def detect_finish(boats, legs_by_sail):
+def detect_finish(boats, legs_by_sail, need=3):
     """Finish ~ end of the last detected leg, fleet median."""
     pts = []
     for b in boats:
         legs = legs_by_sail.get(b.sail) or []
         if legs:
             pts.append((b.lat[legs[-1][1]], b.lon[legs[-1][1]]))
-    return _med_xy(pts)
+    return _med_xy(pts, need)
 
 
-def _split_gate(pts):
+def _split_gate(pts, need=3):
     """Gate buoys from (lat, lon, crosswind) rounding points: two buoys when the
     cross-wind positions are clearly bimodal (gap > 80 m between two groups of
     at least 15% of the roundings each), else one."""
     if len(pts) < 6:
-        gm = _med_xy([(la, lo) for la, lo, _ in pts])
+        gm = _med_xy([(la, lo) for la, lo, _ in pts], need)
         return [gm] if gm else []
     cw = np.sort(np.array([g[2] for g in pts]))
     gaps = np.diff(cw)
@@ -609,11 +609,11 @@ def _split_gate(pts):
         out = []
         for grp in ([(la, lo) for la, lo, c in pts if c < split],
                     [(la, lo) for la, lo, c in pts if c >= split]):
-            gm = _med_xy(grp)
+            gm = _med_xy(grp, need)
             if gm:
                 out.append(gm)
         return out
-    gm = _med_xy([(la, lo) for la, lo, _ in pts])
+    gm = _med_xy([(la, lo) for la, lo, _ in pts], need)
     return [gm] if gm else []
 
 
@@ -668,17 +668,18 @@ def detect_marks(boats, wind_from, legs_by_sail, course, cix_by_sail):
              for b, i0, i1 in spans if i1 > i0]
         return float(np.median(d)) if d else float("inf")
 
+    need = min(3, len(boats))                     # tiny fleets (e.g. 2 training boats) still get marks
     marks = []
     for L in order:
         if gate[L]:
-            src = cand[L]["ext"] if len(cand[L]["ext"]) >= 3 else cand[L]["apex"]
-            lls = _split_gate(src)
+            src = cand[L]["ext"] if len(cand[L]["ext"]) >= need else cand[L]["apex"]
+            lls = _split_gate(src, need)
         else:
-            opts = [_med_xy([(la, lo) for la, lo, _ in cand[L][k]]) for k in ("ext", "apex")]
+            opts = [_med_xy([(la, lo) for la, lo, _ in cand[L][k]], need) for k in ("ext", "apex")]
             opts = [o for o in opts if o]
             lls = [min(opts, key=lambda ll: closest_pass(ll, wins[L]))] if opts else []
         marks += [{"label": L, "ll": ll} for ll in lls]
-    fin = detect_finish(boats, legs_by_sail)
+    fin = detect_finish(boats, legs_by_sail, need)
     if fin:
         marks.append({"label": fin_label, "ll": fin})
     return marks

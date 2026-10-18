@@ -385,8 +385,8 @@ function updateHover(){
   if(s.inrace){
     const av=w=>{ const lo=idxAt(f,S.t-w), hi=idxAt(f,S.t); let q=0,n=0; for(let k=lo;k<=hi;k++){q+=f.vmg[k];n++;} return n?(q/n).toFixed(2):'–'; };
     // direction-aware "gain to mark": upwind=+VMG, downwind=-VMG, reach=SOG (higher always better)
-    const ci=idxAt(f,S.t); let kn='upwind', legA=null, legNo=0;
-    boatLegs(f).forEach(([a,c,k],i)=>{ if(legA==null && ci>=a && ci<=c){ kn=k; legA=a; legNo=i+1; } });
+    const ci=idxAt(f,S.t); let kn='upwind', legA=null, legN=0;
+    boatLegs(f).forEach(([a,c,k],i)=>{ if(legA==null && ci>=a && ci<=c){ kn=k; legA=a; legN=legNo(f,i); } });
     let legAvg='–'; if(legA!=null){ let q=0,nq=0; for(let k=legA;k<=ci;k++){q+=f.vmg[k];nq++;} legAvg=(q/nq).toFixed(2); }
     const am=w=>{ const lo=idxAt(f,S.t-w), hi=idxAt(f,S.t); let q=0,n=0;
       for(let k=lo;k<=hi;k++){ q+=(kn==='downwind'?-f.vmg[k]:kn==='reach'?f.sog[k]:f.vmg[k]); n++; } return n?q/n:0; };
@@ -402,7 +402,7 @@ function updateHover(){
           `SOG <b>${s.sog.toFixed(2)}</b> kt<br>TWA ${s.twa.toFixed(0)}° (${s.tack<0?'Stbd':'Port'})<br>`+
           `VMG ${s.vmg.toFixed(2)} kt<br>COG ${s.cog.toFixed(0)}°<br>`+
           `<span style="color:var(--mut)">avg VMG 5s ${av(5)} · 30s ${av(30)} · 3m ${av(180)}</span><br>`+
-          (legA!=null?`<span style="color:var(--mut)">leg ${legNo} (${kn}) avg VMG so far ${legAvg} kt</span><br>`:'')+
+          (legA!=null?`<span style="color:var(--mut)">leg ${legN} (${kn}) avg VMG so far ${legAvg} kt</span><br>`:'')+
           `<span style="color:var(--mut)">Technique 5v30 ${arr(m5,m30)} &nbsp; Strategy 30v3m ${arr(m30,m180)}</span>`;
     if(S.partner&&S.byS[S.partner]){
       const ps=sampleAt(S.byS[S.partner],S.t);
