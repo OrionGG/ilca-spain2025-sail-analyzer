@@ -619,8 +619,8 @@ def course_index(course, legs):
     return out
 
 
-def finish_by_convergence(boats, starts, origin, target, ref, step=5.0, max_spread=80.0,
-                          min_reach=0.8, margin=40.0):
+def finish_by_convergence(boats, starts, origin, target, ref, step=5.0, max_spread=60.0,
+                          funnel=0.7, min_reach=0.8, margin=40.0):
     """
     The finish line where the finishers' tracks converge: boats funnel between the
     committee boat and the pin, then spread out again as they keep sailing.
@@ -629,8 +629,9 @@ def finish_by_convergence(boats, starts, origin, target, ref, step=5.0, max_spre
     `origin`: that mark (x, y); `target`: rough finish area (x, y); `ref`: sails of the
     finishers. Along the axis origin -> target each boat's first passage of distance s
     is taken with its lateral offset; the line goes where those offsets are narrowest
-    (10-90% width <= max_spread m, reached by >= min_reach of the finishers), spanning
-    the 5-95% offsets. A boat finishes at its first crossing of that segment (+- margin).
+    (10-90% width <= max_spread m and <= funnel x the median width along the scan — a
+    funnel, not a single-file stretch — reached by >= min_reach of the finishers),
+    spanning the 5-95% offsets. A boat finishes at its first crossing of that segment (+- margin).
     Returns None (no convergence, e.g. tracking stopped first) or
     {"ends": [(x, y), (x, y)], "times": {sail: t}}.
     """
@@ -653,15 +654,16 @@ def finish_by_convergence(boats, starts, origin, target, ref, step=5.0, max_spre
     n_ref = sum(1 for s in tracks if s in ref)
     if n_ref < 3:
         return None
-    best = None
+    best, widths = None, []
     for s in np.arange(max(100.0, 0.3 * D), D + 400.0, step):
         lat = [c[int(np.argmax(a >= s))] for sail, (_t, a, c) in tracks.items() if sail in ref and a.max() >= s]
         if len(lat) < max(3, min_reach * n_ref):
             continue
         lo, p10, p90, hi = np.percentile(lat, [5, 10, 90, 95])
-        if p90 - p10 <= max_spread and (best is None or p90 - p10 < best[1]):
+        widths.append(p90 - p10)
+        if best is None or p90 - p10 < best[1]:
             best = (s, p90 - p10, lo, hi)
-    if best is None:
+    if best is None or best[1] > max_spread or best[1] > funnel * float(np.median(widths)):
         return None
     s, _w, lo, hi = best
     times = {}

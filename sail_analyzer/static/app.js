@@ -1018,7 +1018,7 @@ function tabRegatta(body){
     let pv='';
     if(p){ const d=(m.race_min!=null&&r.pr&&r.pr.race_min!=null)?Math.round((m.race_min-r.pr.race_min)*60):null;
       pv=d==null?'<td>–</td>':`<td><b class="${d<=0?'good':'bad'}">${d<=0?'':'+'}${d}s</b></td>`; }
-    h+=`<tr><td>${esc(r.race)}</td><td>${m.rank?`P${m.rank}/${m.n_fin}`:'<span class="bad">DNF</span>'}</td>`+
+    h+=`<tr><td>${esc(r.race)}</td><td>${m.rank?`P${m.rank}/${m.n_fin}`:`<span class="bad">${esc(m.code||'DNF')}</span>`}</td>`+
        cell(dlt(r,'sog_up',m))+cell(dlt(r,'sog_dn',m))+cell(dlt(r,'twa_up',m),true)+
        cell(dlt(r,'tack_loss',m),true)+cell(dlt(r,'dist_nm',m),true)+pv+'</tr>'; }
   h+='</table>'; body.insertAdjacentHTML('beforeend',h);
@@ -1077,7 +1077,10 @@ function dbRoundT(b,ci){ if(ci==null||ci<0) return null; const li=ciMap(b)[ci]; 
   const rr=b._mlegs?null:b.rounds; return rr&&rr[li]!=null?rr[li]:b.t[boatLegs(b)[li][1]]; }
 function isLastFor(b,ci){ const lg=boatLegs(b); return lg.length>0 && courseIdx(b,lg.length-1)===ci; }
 // b crossed the finish line at the end of course leg ci (retirees never "finish")
-function finishesAt(b,ci){ return (officialPlace(b)!=null || !!b.summary.finished) && isLastFor(b,ci); }
+function fleetFinCi(){ const r=S.race; if(r._finCi!=null) return r._finCi;
+  const c={}; for(const b of r.boats) if(b.summary.finished&&b.course_ix&&b.course_ix.length){ const x=b.course_ix[b.course_ix.length-1]; c[x]=(c[x]||0)+1; }
+  const k=Object.keys(c).sort((x,y)=>c[y]-c[x])[0]; return r._finCi=(k==null?-1:+k); }
+function finishesAt(b,ci){ return (officialPlace(b)!=null || !!b.summary.finished) && isLastFor(b,ci) && ci===fleetFinCi(); }
 function dbRankAtMark(b,i,pl){ const my=dbRoundT(b,i); if(my==null) return null; let r=1;
   for(const o of pl){ if(o===b) continue; const ot=dbRoundT(o,i); if(ot!=null&&ot<my) r++; } return r; }
 function dbRankAtT(b,t,pl){ const k=gk(t), my=boatCourse(b)[k]; if(my==null) return null; let r=1;

@@ -105,7 +105,7 @@ def _split_rows(html: str):
 
 
 _HEAD = {
-    "sail": re.compile(r"^(vela|sail|sail ?no\.?|n[º°o]? ?vela|nat\.? ?sail|bow)$", re.I),
+    "sail": re.compile(r"^((nat\.?|nation)\s*)?(vela|sail)(\s*(no\.?|nr\.?|number|num\.?|#))?$|^n[º°o]?\.?\s*(de\s*)?vela$|^bow(\s*(no\.?|#))?$", re.I),
     "name": re.compile(r"^(tripulantes?|name|helm|skipper|crew|regatista|sailor)s?$", re.I),
     "club": re.compile(r"^(club)$", re.I),
     "cat": re.compile(r"^(cat|category|categor[ií]a|div)$", re.I),
@@ -140,7 +140,7 @@ def _parse_table(t):
                 col[k] = i
         m = _RACE.match(h.strip())
         if m:
-            races.append((i, m.group(2)))
+            races.append((i, re.sub(r"\s+", "", h.strip()).upper() if m.group(1) else m.group(2)))
     if "sail" not in col or not races:
         return None
     out = []
@@ -184,7 +184,11 @@ def fetch_results(url: str):
         m = re.search(r"""['"]([^'"]*resultsajax\?[^'"]*allResults=1[^'"]*)['"]""", html) or \
             re.search(r"""['"]([^'"]*resultsajax\?[^'"]+)['"]""", html)
         if m:                                      # Sailti: the table comes from this request
-            html = _fetch(urllib.parse.urljoin(url, m.group(1)))
+            sub = urllib.parse.urljoin(url, m.group(1))
+            su = urllib.parse.urlparse(sub)
+            if su.scheme not in ("http", "https") or su.netloc != u.netloc:
+                raise ValueError("The results page points to another site; give the results table's own link.")
+            html = _fetch(sub)
     except OSError as e:
         raise ValueError(f"Could not download the results page ({e}).")
     res = parse_results(html)
