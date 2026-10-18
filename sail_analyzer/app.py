@@ -226,8 +226,10 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
         a, c, _ = lg[-1]
         ft = float(b.t[c])
         if Fx is not None and finished[b.sail]:
-            # search from the leg start to the END OF TRACK: the leg-end trim can
-            # stop short of the line, which would otherwise bias that boat late
+            # search from the start of the leg where the fleet finishes (a boat with
+            # extra legs has post-finish sailing after it) to the END OF TRACK: the
+            # leg-end trim can stop short of the line, biasing that boat late
+            a = lg[mode_legs - 1][0]
             proj = (b.x[a:] - Fx) * fux + (b.y[a:] - Fy) * fuy
             hit = np.where(proj >= 0)[0]
             if len(hit):
