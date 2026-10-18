@@ -618,9 +618,8 @@ def _write_json(path, obj, compact=False):
 
 def store_race_cache(rid, race, data, cfg):
     """cfg = race_cfg_hash of the tracks as they were when the analysis read them.
-    The old meta goes first: data without a matching meta is stale, never "fresh"."""
-    if os.path.exists(_meta_path(rid, race["id"])):
-        os.remove(_meta_path(rid, race["id"]))
+    The meta is invalidated first: data without a matching meta is stale, never "fresh"."""
+    _write_json(_meta_path(rid, race["id"]), {"cfg": None})   # atomic + retried, unlike a delete
     _write_json(race_cache_path(rid, race["id"]), data, compact=True)
     _write_json(_meta_path(rid, race["id"]), {"cfg": cfg, "name": race["name"],
                                               "key": race.get("key"),
@@ -629,8 +628,16 @@ def store_race_cache(rid, race, data, cfg):
 
 def drop_race_cache(rid, race_id):
     for f in (race_cache_path(rid, race_id), _meta_path(rid, race_id)):
-        if os.path.exists(f):
-            os.remove(f)
+        for attempt in range(20):                 # Windows: a reader may hold the file open
+            try:
+                os.remove(f)
+                break
+            except FileNotFoundError:
+                break
+            except PermissionError:
+                if attempt == 19:
+                    raise
+                threading.Event().wait(0.05)
 
 
 class AnalysisError(ValueError):
@@ -748,7 +755,10 @@ def ensure_cache(rid, rebuild=False):
         for race in rg["races"]:
             if race["id"] not in todo:
                 continue
-            err = build_race_cached(rid, race, force=rebuild)
+            try:
+                err = build_race_cached(rid, race, force=rebuild)
+            except Exception as e:                # one race's failure must not sink the regatta
+                err = f"{type(e).__name__}: {e}"
             if err:
                 print(f"  ! {race['name']}: {err}", flush=True)
         return build_index(rid, rg)
