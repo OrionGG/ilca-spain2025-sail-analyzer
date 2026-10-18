@@ -527,7 +527,8 @@ function officialRow(sail){ const R=S.results; if(!R||sail==null) return null;
   return R._link.get(String(sail))||R._bySail.get(String(sail))||R._bySail.get(sailDigits(sail))||null; }
 // Tracked boats -> official rows, built once per results/index: by sail number, else by name when
 // the numbers differ (a typo on either side): every word of the tracker's name starts a word of
-// exactly one unclaimed row's name, and no other unmatched boat matches that row.
+// exactly one unclaimed row's name (tracker names are cut short), and no other unmatched boat
+// matches that row. A one-word name must be a whole word: a cut single word can't tell sailors apart.
 function nameWords(s){ return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase()
   .split(/[^A-Z]+/).filter(w=>w.length>=3); }
 function linkResults(){ const R=S.results, bySail=new Map(), link=new Map(), byName=new Map(), used=new Set();
@@ -536,7 +537,8 @@ function linkResults(){ const R=S.results, bySail=new Map(), link=new Map(), byN
   const left=[];
   for(const [sail,name] of tracked){ const r=bySail.get(sail)||bySail.get(sailDigits(sail));
     if(r){ link.set(sail,r); used.add(r); } else left.push([sail,nameWords(name)]); }
-  const cands=left.map(([sail,tk])=>[sail, tk.length?R.rows.filter(r=>!used.has(r)&&(ws=>tk.every(t=>ws.some(w=>w.startsWith(t))))(nameWords(r.name))):[]]);
+  const fits=(tk,ws)=>tk.length>1?tk.every(t=>ws.some(w=>w.startsWith(t))):tk.length===1&&ws.includes(tk[0]);
+  const cands=left.map(([sail,tk])=>[sail, R.rows.filter(r=>!used.has(r)&&fits(tk,nameWords(r.name)))]);
   for(const [sail,c] of cands) if(c.length===1&&cands.filter(([,c2])=>c2.includes(c[0])).length===1){ link.set(sail,c[0]); byName.set(c[0],sail); }
   R._bySail=bySail; R._link=link; R._byName=byName; R._ix=S.index; }
 function officialFor(sail, raceId){ const R=S.results, row=officialRow(sail);
