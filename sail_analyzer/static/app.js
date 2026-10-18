@@ -1205,10 +1205,13 @@ function debriefChecks(b){
     } else {
       // ILCA: on the line at the gun at full speed (~1 length back at 5 s, then accelerate). Measured
       // behind the fleet's front row; upwind a Laser covers ~½ length (2 m) per second: <= 2 m is in
-      // the front row, from ~1½ lengths (6 m, ~3 s late) the boat starts in the second row.
+      // the front row, from ~1½ lengths (6 m, ~3 s late) the boat starts in the second row, and from
+      // ~3½ lengths (15 m) it wasn't in the line at the gun at all.
       const behind=Math.round(Math.max(0,-ahead));             // judged as shown (whole m)
       const v=behind<=2?'good':behind<6?'warn':'bad';
-      const gap=`${behind} m (~${(behind/4.2).toFixed(1)} boat lengths, ~${Math.round(behind/2)} s late) behind the front row at the gun`;
+      const vOff=medN(pl.map(o=>trackMean(o,gun,gun+30,i=>o.sog[i])));         // fleet speed off the line, kt
+      const late=Math.round(behind/(Math.max(vOff||3.9,1)*0.5144));
+      const gap=`${behind} m (~${(behind/4.2).toFixed(1)} boat lengths, ~${late} s late) behind the front row at the gun`;
       add(P, v, 'Line position at the gun',
         v==='good'?`On the line at the gun (${behind} m behind the fleet front).`
         :v==='warn'?`${gap}. Be about a length back with 5 s to go and hit the line at full speed with the gun.`
