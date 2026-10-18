@@ -526,9 +526,10 @@ function officialRow(sail){ const R=S.results; if(!R||sail==null) return null;
   if(R._ix!==S.index) linkResults();
   return R._link.get(String(sail))||R._bySail.get(String(sail))||R._bySail.get(sailDigits(sail))||null; }
 // Tracked boats -> official rows, built once per results/index: by sail number, else by name when
-// the numbers differ (a typo on either side): every word of the tracker's name starts a word of
-// exactly one unclaimed row's name (tracker names are cut short), and no other unmatched boat
-// matches that row. A one-word name must be a whole word: a cut single word can't tell sailors apart.
+// the numbers differ (a typo on either side): each word of the tracker's name starts a different
+// word of the row's name (tracker names are cut short); the row must be the only one in the whole
+// table that fits, not yet claimed, and fit by no other unmatched boat. A one-word name must be a
+// whole word: a cut single word can't tell sailors apart.
 function nameWords(s){ return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase()
   .split(/[^A-Z]+/).filter(w=>w.length>=3); }
 function linkResults(){ const R=S.results, bySail=new Map(), link=new Map(), byName=new Map(), used=new Set();
@@ -537,9 +538,13 @@ function linkResults(){ const R=S.results, bySail=new Map(), link=new Map(), byN
   const left=[];
   for(const [sail,name] of tracked){ const r=bySail.get(sail)||bySail.get(sailDigits(sail));
     if(r){ link.set(sail,r); used.add(r); } else left.push([sail,nameWords(name)]); }
-  const fits=(tk,ws)=>tk.length>1?tk.every(t=>ws.some(w=>w.startsWith(t))):tk.length===1&&ws.includes(tk[0]);
-  const cands=left.map(([sail,tk])=>[sail, R.rows.filter(r=>!used.has(r)&&fits(tk,nameWords(r.name)))]);
-  for(const [sail,c] of cands) if(c.length===1&&cands.filter(([,c2])=>c2.includes(c[0])).length===1){ link.set(sail,c[0]); byName.set(c[0],sail); }
+  const fits=(tk,ws)=>{ if(tk.length<2) return tk.length===1&&ws.includes(tk[0]);
+    const free=ws.slice();                           // longest words first, whole words before prefixes
+    return [...tk].sort((a,b)=>b.length-a.length).every(t=>{ let i=free.indexOf(t); if(i<0) i=free.findIndex(w=>w.startsWith(t));
+      return i>=0&&free.splice(i,1).length; }); };
+  const words=new Map(R.rows.map(r=>[r,nameWords(r.name)]));
+  const cands=left.map(([sail,tk])=>[sail, R.rows.filter(r=>fits(tk,words.get(r)))]);
+  for(const [sail,c] of cands) if(c.length===1&&!used.has(c[0])&&cands.filter(([,c2])=>c2.includes(c[0])).length===1){ link.set(sail,c[0]); byName.set(c[0],sail); }
   R._bySail=bySail; R._link=link; R._byName=byName; R._ix=S.index; }
 function officialFor(sail, raceId){ const R=S.results, row=officialRow(sail);
   const col=!row||raceId==null?-1:R.map.indexOf(raceId); return row&&col>=0?row.scores[col]:null; }
