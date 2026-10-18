@@ -37,20 +37,30 @@ def _fetch(url: str) -> str:
         return raw.decode("cp1252", errors="replace")
 
 
+_VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
+         "source", "track", "wbr"}
+
+
 class _Tables(HTMLParser):
     """Collects every <table> as rows of cell texts, skipping display:none content
     (Sailti puts sort keys in hidden spans) and keeping <br> as a space."""
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
-        self.tables, self._stack, self._hidden = [], [], []
+        self.tables, self._stack, self._open = [], [], []     # _open: [(tag, hidden)]
         self._row, self._cell, self._in_head = None, None, False
+
+    def _is_hidden(self):
+        return bool(self._open) and self._open[-1][1]
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
         hidden = "display:none" in (a.get("style") or "").replace(" ", "").lower()
-        if tag not in ("br", "img", "meta", "link", "input"):
-            self._hidden.append(hidden or (bool(self._hidden) and self._hidden[-1]))
+        if tag in ("td", "th", "tr", "table"):          # cells/rows never inherit a stray hidden state
+            while self._open and self._open[-1][0] not in ("td", "th", "tr", "table", "thead", "tbody"):
+                self._open.pop()
+        if tag not in _VOID:
+            self._open.append((tag, hidden or self._is_hidden()))
         if tag == "table":
             self._stack.append({"head": [], "rows": []})
         elif not self._stack:
@@ -64,8 +74,9 @@ class _Tables(HTMLParser):
             self._cell.append(" ")
 
     def handle_endtag(self, tag):
-        if tag not in ("br", "img", "meta", "link", "input") and self._hidden:
-            self._hidden.pop()
+        if any(t == tag for t, _h in self._open):     # pop back to the matching open tag
+            while self._open and self._open.pop()[0] != tag:
+                pass
         if not self._stack:
             return
         if tag in ("td", "th") and self._cell is not None and self._row is not None:
@@ -80,7 +91,7 @@ class _Tables(HTMLParser):
                 self.tables.append(self._stack.pop())
 
     def handle_data(self, data):
-        if self._cell is not None and not (self._hidden and self._hidden[-1]):
+        if self._cell is not None and not self._is_hidden():
             self._cell.append(data)
 
 
@@ -110,8 +121,12 @@ def _num(s):
 
 
 def _score(cell: str):
+    """None for an empty cell (race not sailed / not scored yet)."""
     code = re.search(r"\b([A-Z]{2,5})\b", cell or "")
-    return {"pts": _num(cell), "code": code.group(1) if code else None, "disc": "(" in (cell or "")}
+    pts = _num(cell)
+    if pts is None and not code:
+        return None
+    return {"pts": pts, "code": code.group(1) if code else None, "disc": "(" in (cell or "")}
 
 
 def _parse_table(t):

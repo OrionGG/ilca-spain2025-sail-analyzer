@@ -336,11 +336,22 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
                                 for b in fins], axis=0)
             conv = R.finish_by_convergence(boats, starts, np.mean(_mk[course[pci]["mark"]], axis=0),
                                            target, {b.sail for b in fins})
-            if conv:
+            # sanity: a real line is crossed no later than the previous estimate (which runs late,
+            # to the leg end); a course shortened at its last mark would put a "line" in
+            # post-finish sailing, i.e. clearly later
+            dt = [t - finish_t[s] for s, t in (conv or {}).get("times", {}).items() if s in finish_t]
+            if conv and dt and float(np.median(dt)) <= 60.0:
                 finish_t.update(conv["times"])
                 gps_finish = set(conv["times"])
-                for s in gps_finish:
-                    finished[s] = True                    # crossed the finish line after the last mark
+                for b in boats:
+                    if b.sail not in gps_finish:
+                        continue
+                    finished[b.sail] = True               # crossed the finish line after the last mark
+                    lg, ft = legs_by_sail[b.sail], conv["times"][b.sail]
+                    if lg and cix_by_sail[b.sail] and cix_by_sail[b.sail][-1] == fin_ci:
+                        a, _c, k = lg[-1]             # the last leg (and race window) ends at the line
+                        legs_by_sail[b.sail] = lg[:-1] + [(a, max(a + 1, min(int(np.searchsorted(b.t, ft)), len(b.t) - 1)), k)]
+                        rounds_by_sail[b.sail][-1] = ft
                 fl = course[-1]["mark"]
                 to_ll = lambda px, py: [lat0 + py / 111320.0, lon0 + px / (111320.0 * cosLat)]
                 marks = [m for m in marks if m["label"] != fl] + [{"label": fl, "ll": to_ll(*e)} for e in conv["ends"]]
@@ -351,6 +362,9 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
                  for b in boats}
 
     # fleet aggregate stats on the grid (FINISHERS only — exclude retirees/DNF)
+    ref = [b for b in boats if finished[b.sail]]  # incl. boats seen crossing the finish line
+    if len(ref) < 3:
+        ref = boats
     sog_grid, vmg_grid = [], []
     for b in ref:                                 # finishers (every boat if fewer than 3)
         sog_grid.append(np.interp(grid, b.t, b.sog, left=np.nan, right=np.nan))
@@ -1015,9 +1029,15 @@ class Handler(BaseHTTPRequestHandler):
                 if g is None:
                     raise ValueError("unknown regatta")
                 old = g.get("results") or {}
-                keep = old.get("map") if old.get("columns") == res["races"] else None
+                by_name = dict(zip(old.get("columns") or [], old.get("map") or []))
+                mp = [by_name[c] if c in by_name else None for c in res["races"]]
+                used = {m for m in mp if m}
+                for i, c in enumerate(res["races"]):          # new columns: positional default if free
+                    if c not in by_name and default_map[i] and default_map[i] not in used:
+                        mp[i] = default_map[i]
+                        used.add(mp[i])
                 g["results"] = {"url": url, "fetched": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                                "columns": res["races"], "n": len(res["rows"]), "map": keep or default_map}
+                                "columns": res["races"], "n": len(res["rows"]), "map": mp}
             edit_registry(save)
             return self._json({"ok": True, "n": len(res["rows"]), "columns": res["races"]})
         if parts[3:] == ["results", "map"]:                               # result column -> race
