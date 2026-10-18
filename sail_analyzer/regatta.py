@@ -737,28 +737,33 @@ def detect_finish(boats, legs_by_sail, need=3):
     return _med_xy(pts, need)
 
 
-def _split_gate(pts, need=3):
+def _split_gate(pts, need=3, min_sep=15.0, sharp=2.8):
     """Gate buoys from (lat, lon, crosswind) rounding points: two buoys when the
-    cross-wind positions are clearly bimodal (gap > 80 m between two groups of
-    at least 15% of the roundings each), else one."""
+    cross-wind positions form two clear groups, else one. The best two-way split
+    (least within-group variance, >= 15% of the roundings each side so a stray
+    point can't decide it) counts when its group medians are >= min_sep m apart
+    and >= `sharp` x the groups' spread (IQR): one buoy's roundings split that way
+    give ~2 (p99 ~3); a 40 m ILCA gate gives 3-7."""
     if len(pts) < 6:
         gm = _med_xy([(la, lo) for la, lo, _ in pts], need)
         return [gm] if gm else []
-    cw = np.sort(np.array([g[2] for g in pts]))
-    gaps = np.diff(cw)
+    pts = sorted(pts, key=lambda g: g[2])
+    cw = np.array([g[2] for g in pts])
     n = len(cw)
-    m = max(3, int(0.15 * n))                     # a split must leave >= m roundings each side,
-    cand = gaps[m - 1:n - m] if n >= 2 * m else gaps[:0]   # so a stray point can't decide it
-    if len(cand) and cand.max() > 80:
-        k = m - 1 + int(np.argmax(cand))
-        split = cw[k] + gaps[k] / 2
-        out = []
-        for grp in ([(la, lo) for la, lo, c in pts if c < split],
-                    [(la, lo) for la, lo, c in pts if c >= split]):
-            gm = _med_xy(grp, need)
-            if gm:
-                out.append(gm)
-        return out
+    m = max(3, int(0.15 * n))
+    best = None
+    for k in range(m, n - m + 1):
+        w = k * cw[:k].var() + (n - k) * cw[k:].var()
+        if best is None or w < best[0]:
+            best = (w, k)
+    if best:
+        k = best[1]
+        a, b = cw[:k], cw[k:]
+        iqr = lambda v: float(np.subtract(*np.percentile(v, [75, 25])))
+        sep = float(np.median(b) - np.median(a))
+        if sep >= min_sep and sep >= sharp * max((iqr(a) + iqr(b)) / 2, 3.0):
+            out = [_med_xy([(la, lo) for la, lo, _ in grp], need) for grp in (pts[:k], pts[k:])]
+            return [g for g in out if g]
     gm = _med_xy([(la, lo) for la, lo, _ in pts], need)
     return [gm] if gm else []
 
@@ -775,7 +780,8 @@ def detect_marks(boats, wind_from, legs_by_sail, course, cix_by_sail):
     turn apex at the leg end. Per mark the candidate the fleet's tracks pass
     closest to wins (beats into the top mark favour the furthest-upwind point,
     beats into a wing mark the bear-away apex). Gates use the furthest-downwind
-    points, split into two buoys when the fleet used both.
+    points of the runs followed by a beat, split into two buoys when the fleet
+    used both.
     Returns a list of {"label", "ll": [lat, lon]}.
     """
     wf = math.radians(wind_from)
@@ -801,7 +807,9 @@ def detect_marks(boats, wind_from, legs_by_sail, course, cix_by_sail):
                 continue
             a, c, _ = legs[li]
             L, T = course[ci]["mark"], course[ci]["type"]
-            if T in ("U", "D"):
+            # a run's furthest-downwind point is its rounding only when a beat follows (a reach
+            # after it, e.g. to the finish, goes further downwind)
+            if T == "U" or (T == "D" and course[ci + 1]["type"] == "U"):
                 j = a + int(np.argmax(p[a:c + 1]) if T == "U" else np.argmin(p[a:c + 1]))
                 cand[L]["ext"].append((b.lat[j], b.lon[j], float(b.x[j] * lx + b.y[j] * ly)))
             j = _refine_turn(b, c)

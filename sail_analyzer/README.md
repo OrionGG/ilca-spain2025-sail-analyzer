@@ -62,8 +62,9 @@ approximate — the relative comparisons are the trustworthy part.
 (copied into `data/`), set the course (template or custom leg table: leg type, mark it
 ends at, gate) and an optional gun time. Legs are fitted to the course's leg-type
 sequence; each mark is placed where the fleet actually rounded it (furthest-upwind
-point or turn apex, whichever the tracks pass closest to; gates split into two buoys
-when both were used). See the main README for the step-by-step.
+point or turn apex, whichever the tracks pass closest to; a gate is placed from the
+runs followed by a beat, split into two buoys when the roundings form two clear groups).
+See the main README for the step-by-step.
 
 ## Finish detection and official results
 The finish is found where the finishers' tracks converge after the last mark (they
