@@ -870,7 +870,7 @@ def index_entry(i, race_id, data):
     mini = {}
     for b in data["boats"]:
         s = b["summary"]
-        mini[b["sail"]] = {**{k: s.get(k) for k in keys},
+        mini[b["sail"]] = {**{k: s.get(k) for k in keys}, "name": b.get("name"),
                            "finished": s.get("finished"),
                            "rank": rank.get(b["sail"]), "n_fin": len(order)}
     return {"i": i, "id": race_id, "race": data["race"], "start_iso": data["start_iso"],
