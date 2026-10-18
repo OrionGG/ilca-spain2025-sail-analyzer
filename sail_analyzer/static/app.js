@@ -522,9 +522,10 @@ function buildLegBar(){
 
 // ---------- official results (downloaded per regatta; the reference for finish places) ----------
 // score {pts, code, disc} of a boat (by sail) in a race (by id); low-point: pts = place
-function officialFor(sail, raceId){ const R=S.results; if(!R||sail==null) return null;
-  const d=sailDigits(sail), row=R.rows.find(r=>r.sail===String(sail))||R.rows.find(r=>r.sail===d);
-  const col=raceId==null?-1:R.map.indexOf(raceId); return row&&col>=0?row.scores[col]:null; }
+function officialRow(sail){ const R=S.results; if(!R||sail==null) return null;
+  const d=sailDigits(sail); return R.rows.find(r=>r.sail===String(sail))||R.rows.find(r=>r.sail===d)||null; }
+function officialFor(sail, raceId){ const R=S.results, row=officialRow(sail);
+  const col=!row||raceId==null?-1:R.map.indexOf(raceId); return row&&col>=0?row.scores[col]:null; }
 function sailDigits(s){ return (String(s).match(/\d+/g)||['']).reduce((a,b)=>b.length>a.length?b:a,''); }
 function curRaceId(){ return S.index&&S.index[S.raceIdx]?S.index[S.raceIdx].id:null; }
 function officialScore(b){ return b?officialFor(b.sail, curRaceId()):null; }
@@ -993,7 +994,7 @@ function tabRegatta(body){
   const idx=S.index||[], p=partnerB(), pn=p?p.name.slice(0,10):null;
   const withOff=(m,sail,r)=>{ const s=officialFor(sail,r.id); if(!m||!s) return m;
     const scored=S.results.rows.filter(x=>{ const v=officialFor(x.sail,r.id); return v&&!noFinish(v); }).length;
-    return {...m, rank:noFinish(s)?null:(officialPlaceBySail(sail,r.id)??(s.pts!=null?Math.round(s.pts):m.rank)), n_fin:scored, code:s.code}; };
+    return {...m, rank:officialPlaceBySail(sail,r.id)??(s.code?null:m.rank), n_fin:scored, code:s.code, pts:s.pts}; };
   const rows=idx.map(r=>({x:r.i+1, race:r.race, fl:r.fleet||{}, me:withOff((r.boats||{})[S.focus]||null,S.focus,r),
                           pr:p?withOff((r.boats||{})[S.partner]||null,S.partner,r):null}));
   if(!rows.length || !rows.some(r=>r.me)){ body.insertAdjacentHTML('beforeend','<div class="muted">No regatta summary yet — reopen the regatta (top bar) to analyse its races.</div>'); return; }
@@ -1032,7 +1033,9 @@ function tabRegatta(body){
     let pv='';
     if(p){ const d=(m.race_min!=null&&r.pr&&r.pr.race_min!=null)?Math.round((m.race_min-r.pr.race_min)*60):null;
       pv=d==null?'<td>–</td>':`<td><b class="${d<=0?'good':'bad'}">${d<=0?'':'+'}${d}s</b></td>`; }
-    h+=`<tr><td>${esc(r.race)}</td><td>${m.rank?`P${m.rank}/${m.n_fin}${m.code?` <span class="muted">${esc(m.code)}</span>`:''}`:`<span class="bad">${esc(m.code||'DNF')}</span>`}</td>`+
+    const place=m.rank?`P${m.rank}/${m.n_fin}`:m.code&&!NO_FINISH.has(m.code)?`<span title="official score">${esc(m.code)} ${m.pts??''}</span>`
+      :`<span class="bad">${esc(m.code||'DNF')}</span>`;
+    h+=`<tr><td>${esc(r.race)}</td><td>${place}</td>`+
        cell(dlt(r,'sog_up',m))+cell(dlt(r,'sog_dn',m))+cell(dlt(r,'twa_up',m),true)+
        cell(dlt(r,'tack_loss',m),true)+cell(dlt(r,'dist_nm',m),true)+pv+'</tr>'; }
   h+='</table>'; body.insertAdjacentHTML('beforeend',h);
@@ -1369,16 +1372,18 @@ function debriefChecks(b){
   // ---------------- SERIES ----------------
   const series=(S.index||[]).map(x=>({i:x.i, race:x.race, rk:(x.boats||{})[b.sail]?.rank??null, n:(x.boats||{})[b.sail]?.n_fin}));
   const done=series.filter(x=>x.rk!=null);
-  const offDisc=(S.index||[]).filter(x=>{ const s=officialFor(b.sail,x.id); return s&&s.disc; });
-  const offSer=S.results?(S.index||[]).map(x=>({i:x.i, race:x.race, s:officialFor(b.sail,x.id)})).filter(x=>x.s):[];
+  // official series: every scored column of the boat's row, tracked races or not
+  const R=S.results, orow=officialRow(b.sail), cur=curRaceId();
+  const colName=k=>{ const x=(S.index||[]).find(y=>y.id===R.map[k]); return x?x.race:'R'+(R.races||[])[k]; };
+  const ocols=orow?orow.scores.map((s,k)=>({k,s})).filter(x=>x.s):[], odisc=ocols.filter(x=>x.s.disc);
   const pts=s=>s.pts!=null?s.pts:1e9;                // a code without points: worst
-  if(S.results&&offDisc.length){ const here=offDisc.some(x=>x.i===S.raceIdx);
-    add('Series',here?'warn':'info','Discard (official)',`Discarded in the official results: ${offDisc.map(x=>`${esc(x.race)} (${scoreText(officialFor(b.sail,x.id))})`).join(', ')}. `+
+  if(odisc.length){ const here=odisc.some(x=>R.map[x.k]===cur);
+    add('Series',here?'warn':'info','Discard (official)',`Discarded in the official results: ${odisc.map(x=>`${esc(colName(x.k))} (${scoreText(x.s)})`).join(', ')}. `+
       (here?'This race is your discard — the next bad one will count, so keep the risk controlled.':'This race counts.')); }
-  else if(offSer.length>=2){ const worst=offSer.reduce((p1,c1)=>pts(c1.s)>pts(p1.s)?c1:p1), here=offSer.find(x=>x.i===S.raceIdx), isD=here&&worst.i===here.i;
-    add('Series',isD?'warn':'info','Discard (official)',`Worst official score so far (likely discard): ${esc(worst.race)} ${scoreText(worst.s)}. `+
+  else if(ocols.length>=2){ const worst=ocols.reduce((p1,c1)=>pts(c1.s)>pts(p1.s)?c1:p1), here=ocols.find(x=>R.map[x.k]===cur), isD=here&&worst.k===here.k;
+    add('Series',isD?'warn':'info','Discard (official)',`Worst official score so far (likely discard): ${esc(colName(worst.k))} ${scoreText(worst.s)}. `+
       (isD?'This race is your discard — the next bad one will count, so keep the risk controlled.':`This race (${here?scoreText(here.s):'–'}) counts.`)); }
-  else if(offSer.length<2&&done.length>=2){ const worst=done.reduce((p1,c1)=>c1.rk>p1.rk?c1:p1), here=series.find(x=>x.i===S.raceIdx), isD=here&&worst.i===here.i;
+  else if(done.length>=2){ const worst=done.reduce((p1,c1)=>c1.rk>p1.rk?c1:p1), here=series.find(x=>x.i===S.raceIdx), isD=here&&worst.i===here.i;
     add('Series',isD?'warn':'info','Discard',`Worst race so far (likely discard): ${worst.race} P${worst.rk}/${worst.n}. `+
       (isD?'This race is your discard — the next bad one will count, so keep the risk controlled.':`This race (P${here?.rk??'–'}) counts.`)); }
   return out;

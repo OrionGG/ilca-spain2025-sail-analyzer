@@ -693,8 +693,8 @@ def finish_by_convergence(boats, starts, origin, target, ref, step=5.0, max_spre
                 best_out = (out, tj)
         if sail not in times and best_out:
             near[sail] = best_out[1]
-    # finishers slow from racing speed within a few minutes of the line (checked when most are
-    # still tracked a while after it)
+    # finishers slow from racing speed within a few minutes of the line; without that evidence
+    # (most of them still tracked a while after it) a funnel isn't taken as the finish
     slow = []
     for b in boats:
         ft = times.get(b.sail)
@@ -703,7 +703,7 @@ def finish_by_convergence(boats, starts, origin, target, ref, step=5.0, max_spre
         m1, m2 = (b.t >= ft - 60) & (b.t < ft), (b.t >= ft + 60) & (b.t < ft + 180)
         if m1.sum() > 2 and m2.sum() > 2:
             slow.append(float(np.median(b.sog[m2])) / max(float(np.median(b.sog[m1])), 0.1))
-    if len(slow) >= max(3, 0.5 * len(times)) and float(np.median(slow)) > 0.7:
+    if len(slow) < max(3, 0.5 * len(times)) or float(np.median(slow)) > 0.7:
         return None
     ends = [tuple(o + s * u + w * nrm) for w in (lo - 10.0, hi + 10.0)]
     return {"ends": ends, "times": times, "near": near}
