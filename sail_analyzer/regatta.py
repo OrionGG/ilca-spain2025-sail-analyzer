@@ -737,28 +737,40 @@ def detect_finish(boats, legs_by_sail, need=3):
     return _med_xy(pts, need)
 
 
-def _split_gate(pts, need=3):
+def _split_gate(pts, need=3, min_sep=25.0, max_sep=150.0, max_ratio=0.2):
     """Gate buoys from (lat, lon, crosswind) rounding points: two buoys when the
-    cross-wind positions are clearly bimodal (gap > 80 m between two groups of
-    at least 15% of the roundings each), else one."""
+    cross-wind positions form two clear groups, else one. Each group needs >= 15% of
+    the roundings (at least 4), so strays (fewer than that, beyond a 30 m gap at either
+    end) are dropped first, when enough roundings remain for two groups. The best
+    two-way split (least within-group variance) counts when the groups keep
+    <= max_ratio of the variance and their medians are min_sep..max_sep m apart (an
+    ILCA gate is ~30-50 m wide; a far-off group is strays, not a buoy). One buoy's
+    roundings keep ~0.36 (normal spread; < 0.2 in <0.5% of draws up to sd 10 m), the
+    Copa 2025 gates 0.05-0.19."""
     if len(pts) < 6:
         gm = _med_xy([(la, lo) for la, lo, _ in pts], need)
         return [gm] if gm else []
-    cw = np.sort(np.array([g[2] for g in pts]))
-    gaps = np.diff(cw)
+    pts = sorted(pts, key=lambda g: g[2])
+    cw = np.array([g[2] for g in pts])
     n = len(cw)
-    m = max(3, int(0.15 * n))                     # a split must leave >= m roundings each side,
-    cand = gaps[m - 1:n - m] if n >= 2 * m else gaps[:0]   # so a stray point can't decide it
-    if len(cand) and cand.max() > 80:
-        k = m - 1 + int(np.argmax(cand))
-        split = cw[k] + gaps[k] / 2
-        out = []
-        for grp in ([(la, lo) for la, lo, c in pts if c < split],
-                    [(la, lo) for la, lo, c in pts if c >= split]):
-            gm = _med_xy(grp, need)
-            if gm:
-                out.append(gm)
-        return out
+    m = max(4, int(0.15 * n))
+    gaps = np.diff(cw)
+    i0 = max([t for t in range(1, m) if gaps[t - 1] >= 30.0], default=0)
+    i1 = n - max([t for t in range(1, m) if gaps[n - 1 - t] >= 30.0], default=0)
+    if i1 - i0 >= 2 * m:
+        pts, cw = pts[i0:i1], cw[i0:i1]
+        n = len(cw)
+    if n >= 2 * m:
+        s1, s2 = np.cumsum(cw), np.cumsum(cw * cw)    # within-group sum of squares per split
+        ks = np.arange(m, n - m + 1)
+        sse = (s2[ks - 1] - s1[ks - 1] ** 2 / ks) + ((s2[-1] - s2[ks - 1]) - (s1[-1] - s1[ks - 1]) ** 2 / (n - ks))
+        tot = s2[-1] - s1[-1] ** 2 / n
+        j = int(np.argmin(sse))
+        k = int(ks[j])
+        sep = float(np.median(cw[k:]) - np.median(cw[:k]))
+        if tot > 0 and sse[j] <= max_ratio * tot and min_sep <= sep <= max_sep:
+            out = [_med_xy([(la, lo) for la, lo, _ in grp], need) for grp in (pts[:k], pts[k:])]
+            return [g for g in out if g]
     gm = _med_xy([(la, lo) for la, lo, _ in pts], need)
     return [gm] if gm else []
 
@@ -775,7 +787,8 @@ def detect_marks(boats, wind_from, legs_by_sail, course, cix_by_sail):
     turn apex at the leg end. Per mark the candidate the fleet's tracks pass
     closest to wins (beats into the top mark favour the furthest-upwind point,
     beats into a wing mark the bear-away apex). Gates use the furthest-downwind
-    points, split into two buoys when the fleet used both.
+    points of the runs followed by a beat, split into two buoys when the fleet
+    used both.
     Returns a list of {"label", "ll": [lat, lon]}.
     """
     wf = math.radians(wind_from)
@@ -801,7 +814,9 @@ def detect_marks(boats, wind_from, legs_by_sail, course, cix_by_sail):
                 continue
             a, c, _ = legs[li]
             L, T = course[ci]["mark"], course[ci]["type"]
-            if T in ("U", "D"):
+            # a run's furthest-downwind point is its rounding only when a beat follows (a reach
+            # after it, e.g. to the finish, goes further downwind)
+            if T == "U" or (T == "D" and course[ci + 1]["type"] == "U"):
                 j = a + int(np.argmax(p[a:c + 1]) if T == "U" else np.argmin(p[a:c + 1]))
                 cand[L]["ext"].append((b.lat[j], b.lon[j], float(b.x[j] * lx + b.y[j] * ly)))
             j = _refine_turn(b, c)
