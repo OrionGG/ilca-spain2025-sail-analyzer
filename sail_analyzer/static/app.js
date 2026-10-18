@@ -153,14 +153,18 @@ function legsFromMarks(b){
     if(!ll.length) break;
     seq.push({ll,k:LEG_KIND[c[i].type]}); }
   const n=b.lat.length, R=70;
-  const md=(i,lls)=>Math.min(...lls.map(ll=>distM(b.lat[i],b.lon[i],ll[0],ll[1])));
+  const segD=(i,A,B)=>{ const [px,py]=toXY(b.lat[i],b.lon[i]), [ax,ay]=toXY(A[0],A[1]), [bx,by]=toXY(B[0],B[1]);
+    const vx=bx-ax, vy=by-ay, L=vx*vx+vy*vy, f=L?Math.max(0,Math.min(1,((px-ax)*vx+(py-ay)*vy)/L)):0;
+    return Math.hypot(px-ax-f*vx, py-ay-f*vy); };
+  const md=(i,lls,line)=>line&&lls.length===2?segD(i,lls[0],lls[1]):Math.min(...lls.map(ll=>distM(b.lat[i],b.lon[i],ll[0],ll[1])));
   const g0 = S.race.gun_t ? idxAt(b,S.race.gun_t) : 0;   // leg 1 starts at the gun
   const legs=[]; let start=g0, prev=g0;
   for(const s of seq){
-    let i=prev+1; while(i<n && md(i,s.ll)>R) i++;        // enter the mark's zone
+    const line=s===seq[seq.length-1]&&seq.length===c.length;   // the finish: a line between its two marks
+    let i=prev+1; while(i<n && md(i,s.ll,line)>R) i++;        // enter the mark's zone
     if(i>=n) break;
-    let bi=i, bd=md(i,s.ll);
-    while(i<n && md(i,s.ll)<=R*1.6){ const d=md(i,s.ll); if(d<bd){bd=d;bi=i;} i++; }  // closest pt in pass
+    let bi=i, bd=md(i,s.ll,line);
+    while(i<n && md(i,s.ll,line)<=R*1.6){ const d=md(i,s.ll,line); if(d<bd){bd=d;bi=i;} i++; }  // closest pt in pass
     if(bi-start<2) break;                                 // degenerate (e.g. finish == gate)
     legs.push([start,bi,s.k]); start=bi; prev=bi;
   }
@@ -181,7 +185,7 @@ function courseFromLegs(b,legs){      // cumulative made-good along each leg axi
     return course[i]+(course[j]-course[i])*f; });
 }
 function applyManualMarks(){
-  const on=marksOverridden();
+  const on=marksOverridden(); if(S.race) S.race._finCi=null;
   for(const b of S.race.boats){
     if(on){ const lg=legsFromMarks(b); b._mlegs=lg; b._mcourse=lg?courseFromLegs(b,lg):null; }
     else { b._mlegs=null; b._mcourse=null; }
@@ -225,6 +229,11 @@ function renderBG(){
   if(rc&&pin){ const p1=proj(rc[0],rc[1]), p2=proj(pin[0],pin[1]);
     bgx.strokeStyle='rgba(245,166,35,.75)'; bgx.lineWidth=2*DPR;
     bgx.setLineDash([6*DPR,5*DPR]); bgx.beginPath();
+    bgx.moveTo(p1[0],p1[1]); bgx.lineTo(p2[0],p2[1]); bgx.stroke(); bgx.setLineDash([]); }
+  // finish line between its two marks (where the finishers' tracks converge)
+  const cl=courseLegs(), fin=cl.length?markBy(cl[cl.length-1].mark):[];
+  if(fin.length===2){ const p1=proj(fin[0][0],fin[0][1]), p2=proj(fin[1][0],fin[1][1]);
+    bgx.strokeStyle='rgba(120,220,140,.8)'; bgx.lineWidth=2*DPR; bgx.setLineDash([6*DPR,5*DPR]); bgx.beginPath();
     bgx.moveTo(p1[0],p1[1]); bgx.lineTo(p2[0],p2[1]); bgx.stroke(); bgx.setLineDash([]); }
   // ideal route = fastest demonstrated track per leg (real paths, stitched)
   if(S.showIdeal){ const wps=idealRoute();
@@ -511,6 +520,22 @@ function buildLegBar(){
     S.legFilter = p.dataset.leg==='all' ? 'all' : +p.dataset.leg; setTab(S.tab); });
 }
 
+// ---------- official results (downloaded per regatta; the reference for finish places) ----------
+// score {pts, code, disc} of a boat (by sail) in a race (by id); low-point: pts = place
+function officialRow(sail){ const R=S.results; if(!R||sail==null) return null;
+  const d=sailDigits(sail); return R.rows.find(r=>r.sail===String(sail))||R.rows.find(r=>r.sail===d)||null; }
+function officialFor(sail, raceId){ const R=S.results, row=officialRow(sail);
+  const col=!row||raceId==null?-1:R.map.indexOf(raceId); return row&&col>=0?row.scores[col]:null; }
+function sailDigits(s){ return (String(s).match(/\d+/g)||['']).reduce((a,b)=>b.length>a.length?b:a,''); }
+function curRaceId(){ return S.index&&S.index[S.raceIdx]?S.index[S.raceIdx].id:null; }
+function officialScore(b){ return b?officialFor(b.sail, curRaceId()):null; }
+// codes for boats that did not finish / were removed; other codes (ZFP, SCP, DPI, RDG...) finished
+const NO_FINISH=new Set(['DNC','DNS','OCS','UFD','BFD','DNF','RET','DSQ','DNE','DGM','NSC','RAF','TLE']);
+const noFinish=s=>!!(s&&s.code&&NO_FINISH.has(s.code));
+function officialPlace(b){ const s=officialScore(b); return s&&!s.code&&s.pts!=null?Math.round(s.pts):null; }
+function officialPlaceBySail(sail, raceId){ const s=officialFor(sail, raceId); return s&&!s.code&&s.pts!=null?Math.round(s.pts):null; }
+function scoreText(s){ return s?(s.code?s.code:'P'+Math.round(s.pts)):'–'; }
+
 function finishers(){ const f=S.race.boats.filter(b=>b.summary.finished); return f.length?f:S.race.boats; }
 function fleetMedians(){
   const keys=['sog_mean','sog_up','sog_dn','twa_up','twa_dn','vmg_up','vmg_dn','n_tacks','n_gybes','tack_loss','gybe_loss','dist_nm'];
@@ -548,7 +573,10 @@ function keyFindings(body){
   const rank=1+boats.filter(o=>o.summary.race_min<rt).length;     // finish by elapsed gun->finish time
   const B=[];   // bullets
   const close=boats.filter(o=>o.sail!==S.focus && Math.abs(o.summary.race_min-rt)*60<=20).length;
-  if(rt!=null&&medRT!=null) B.push(`Finished ~<b>P${rank}/${n}</b>${nRet?` (of ${nStarted} started; ${nRet} retired)`:''} by elapsed time (${rt} min, fleet median ${medRT.toFixed(1)}; ${fmtS(rt-medRT,1)} min)`+
+  const osc=officialScore(f);
+  if(osc) B.push(`Official result: <b>${scoreText(osc)}</b>${osc.disc?' (discarded)':''}`+
+    (rt!=null&&medRT!=null?` — GPS finish ~P${rank}/${n} by elapsed time (${rt} min, fleet median ${medRT.toFixed(1)}).`:'.'));
+  else if(rt!=null&&medRT!=null) B.push(`Finished ~<b>P${rank}/${n}</b>${nRet?` (of ${nStarted} started; ${nRet} retired)`:''} by elapsed time (${rt} min, fleet median ${medRT.toFixed(1)}; ${fmtS(rt-medRT,1)} min)`+
     (close>0?` — but ${close} boat${close>1?'s are':' is'} within GPS finish error (~20 s), so the exact place is uncertain.`:'.'));
   // per-leg time vs fleet median, leg by leg of the course
   const legT=(o,ci)=>{ const li=ciMap(o)[ci]; if(li==null) return null; const lg=boatLegs(o)[li]; return o.t[lg[1]]-o.t[lg[0]]; };
@@ -573,8 +601,11 @@ function keyFindings(body){
   if(spd<-0.05) weak.push('boatspeed');
   if(s.dist_nm-fm.dist_nm>0.1) weak.push('extra distance');
   let head;
-  if(rank<=n/3) head = spd>=0.03?'Strong — fast and well sailed.':'Good result from tactics/shifts/start, not raw speed.';
-  else if(rank>=2*n/3) head = 'Tough race, near the back'+(weak.length?` — cost mainly by ${weak[0]}.`:'.');
+  const op=officialPlace(f), offN=S.results?S.results.rows.filter(r=>{ const sc=officialFor(r.sail,curRaceId()); return sc&&!noFinish(sc); }).length:0;
+  const hr=op??rank, hn=op!=null?offN:n;
+  if(noFinish(osc)) head = `Scored ${osc.code} in the official results`+(weak.length?` — GPS also points to ${weak[0]}.`:'.');
+  else if(hr<=hn/3) head = spd>=0.03?'Strong — fast and well sailed.':'Good result from tactics/shifts/start, not raw speed.';
+  else if(hr>=2*hn/3) head = 'Tough race, near the back'+(weak.length?` — cost mainly by ${weak[0]}.`:'.');
   else head = spd>0.05?'Mid-fleet; boatspeed ok, places lost on tactics/start.':'Mid-fleet; small margins.';
   // partner line
   let pb='';
@@ -912,16 +943,24 @@ function tabPosition(body){
   const colLabel=i=>legMarkLabel(i)+(i===finCol&&i<courseLegs().length-1?' (finish)':'');
   let mt=`<table><tr><th>Boat</th>${Array.from({length:NL},(_,i)=>`<th>${esc(colLabel(i))}</th>`).join('')}</tr>`;
   const rowFor=(boat,color)=>{ let prev=null, tds='';
-    for(let i=0;i<NL;i++){ const rk2=finishesAt(boat,i)?dbFinishRank(boat,pool):rankAtLeg(boat,i);   // finish line
+    for(let i=0;i<NL;i++){ const sc=isLastFor(boat,i)?officialScore(boat):null;
+      if(noFinish(sc)){ tds+=`<td><span class="bad" title="official result">${esc(sc.code)}</span></td>`; continue; }
+      const fin=finishesAt(boat,i), rk2=fin?dbFinishRank(boat,pool):rankAtLeg(boat,i);   // finish: official order, else finish line
       const d=(rk2!=null&&prev!=null)?rk2-prev:null; if(rk2!=null)prev=rk2;
       const badge=d==null||d===0?'':` <span class="${d<0?'good':'bad'}" style="font-size:10px">${d<0?'+'+(-d):'−'+d}</span>`;
-      tds+=`<td>${rk2==null?'–':'P'+rk2}${badge}</td>`; }
+      const op=fin?officialPlace(boat):null, shown=op!=null?op:rk2;               // the official place itself
+      // boats ahead not tracked (or not matched): the official place isn't on the mark ranks'
+      // scale, so the rank among the tracked boats and its gain/loss go alongside
+      const tip=op==null?'':op===rk2?' title="official result"':` title="official result; P${rk2} among the tracked boats"`;
+      const extra=op==null||op===rk2?badge:` <span class="muted" style="font-size:10px">(P${rk2} tracked${badge})</span>`;
+      tds+=`<td${tip}>${shown==null?'–':'P'+shown}${extra}</td>`; }
     return `<tr><td style="color:${color}">${boat.name.slice(0,12)}</td>${tds}</tr>`; };
   mt+=rowFor(f,'var(--focus)'); if(p) mt+=rowFor(p,'var(--partner)');
   mt+='</table>'; body.insertAdjacentHTML('beforeend',mt);
   body.insertAdjacentHTML('beforeend',`<div class="muted" style="margin-top:4px;font-size:11px">P = place at that mark
    (order the fleet rounded it); green/red = places gained/lost on the leg just sailed. Mark ranks come from rounding
-   times (robust); the Finish column uses the finish-line crossing (±~20 s in packs). Retirees excluded.</div>`);
+   times (robust); the finish column is the official result when downloaded (Regattas…), else the GPS
+   finish-line crossing. Retirees excluded.</div>`);
 
   // gains/losses summary
   const rk=rankOf(f).filter(x=>x[1]!=null);
@@ -953,8 +992,11 @@ function row_eff(rank,x,it){ const lost=x.rt-it; const me=x.sail===S.focus;
 // ---------- Regatta tab: trends across all races ----------
 function tabRegatta(body){
   const idx=S.index||[], p=partnerB(), pn=p?p.name.slice(0,10):null;
-  const rows=idx.map(r=>({x:r.i+1, race:r.race, fl:r.fleet||{}, me:(r.boats||{})[S.focus]||null,
-                          pr:p?((r.boats||{})[S.partner]||null):null}));
+  const withOff=(m,sail,r)=>{ const s=officialFor(sail,r.id); if(!m||!s) return m;
+    const scored=S.results.rows.filter(x=>{ const v=officialFor(x.sail,r.id); return v&&!noFinish(v); }).length;
+    return {...m, rank:officialPlaceBySail(sail,r.id)??(s.code?null:m.rank), n_fin:scored, code:s.code, pts:s.pts}; };
+  const rows=idx.map(r=>({x:r.i+1, race:r.race, fl:r.fleet||{}, me:withOff((r.boats||{})[S.focus]||null,S.focus,r),
+                          pr:p?withOff((r.boats||{})[S.partner]||null,S.partner,r):null}));
   if(!rows.length || !rows.some(r=>r.me)){ body.insertAdjacentHTML('beforeend','<div class="muted">No regatta summary yet — reopen the regatta (top bar) to analyse its races.</div>'); return; }
   const N=rows.length, fmtX=t=>'R'+Math.round(t);
   const opt={xmin:0.5, xmax:N+0.5, fmtX};
@@ -991,7 +1033,9 @@ function tabRegatta(body){
     let pv='';
     if(p){ const d=(m.race_min!=null&&r.pr&&r.pr.race_min!=null)?Math.round((m.race_min-r.pr.race_min)*60):null;
       pv=d==null?'<td>–</td>':`<td><b class="${d<=0?'good':'bad'}">${d<=0?'':'+'}${d}s</b></td>`; }
-    h+=`<tr><td>${esc(r.race)}</td><td>${m.rank?`P${m.rank}/${m.n_fin}`:'<span class="bad">DNF</span>'}</td>`+
+    const place=m.rank?`P${m.rank}/${m.n_fin}`:m.code&&!NO_FINISH.has(m.code)?`<span title="official score">${esc(m.code)} ${m.pts??''}</span>`
+      :`<span class="bad">${esc(m.code||'DNF')}</span>`;
+    h+=`<tr><td>${esc(r.race)}</td><td>${place}</td>`+
        cell(dlt(r,'sog_up',m))+cell(dlt(r,'sog_dn',m))+cell(dlt(r,'twa_up',m),true)+
        cell(dlt(r,'tack_loss',m),true)+cell(dlt(r,'dist_nm',m),true)+pv+'</tr>'; }
   h+='</table>'; body.insertAdjacentHTML('beforeend',h);
@@ -1008,6 +1052,23 @@ function tabRegatta(body){
     (iss.length?`<div class="muted" style="font-size:13px;line-height:1.6"><ul style="margin:0;padding-left:18px">`+
       iss.map(([w,c])=>`<li><b>${w}</b> — below fleet in ${c}/${N} races</li>`).join('')+'</ul></div>'
     :'<div class="muted">No recurring weakness vs the fleet — gains are race-specific (see per-race table).</div>'));
+  officialTable(body);
+}
+// Official overall results table (downloaded from the regatta's results page)
+function officialTable(body){
+  const R=S.results; if(!R||!R.rows.length) return;
+  const focus=sailDigits(S.focus), part=S.partner?sailDigits(S.partner):null;
+  let h=`<div class="sectitle">Official results (${R.rows.length} boats${R.fetched?' · downloaded '+esc(R.fetched.slice(0,10)):''})</div>
+    <div style="overflow-x:auto"><table class="offres"><tr><th>#</th><th>Sail</th><th style="text-align:left">Name</th><th>Cat</th><th>Net</th><th>Total</th>`+
+    R.columns.map((c,i)=>`<th title="${esc((S.index.find(x=>x.id===R.map[i])||{}).race||'not a tracked race')}">${esc(c)}</th>`).join('')+'</tr>';
+  for(const r of R.rows){
+    const me=r.sail===focus, pr=part&&r.sail===part;
+    h+=`<tr${me?' style="background:rgba(245,166,35,.18)"':pr?' style="background:rgba(58,160,255,.15)"':''}><td>${r.rank??''}</td><td>${esc(r.sail_raw)}</td>`+
+      `<td style="text-align:left">${esc(r.name)}</td><td>${esc(r.cat||'')}</td><td>${r.net??''}</td><td>${r.total??''}</td>`+
+      r.scores.map(sc=>{ if(!sc) return '<td></td>'; const v=sc.code?`${sc.code}${sc.pts!=null?' '+Math.round(sc.pts):''}`:(sc.pts!=null?Math.round(sc.pts):'');
+        return `<td${sc.code?' class="bad"':''}>${sc.disc?'('+v+')':v}</td>`; }).join('')+'</tr>';
+  }
+  body.insertAdjacentHTML('beforeend',h+'</table></div><div class="muted" style="font-size:11px">( ) = discarded · codes: UFD/BFD = over the line, DNF/RET = did not finish / retired, DNC = did not compete, DSQ = disqualified.</div>');
 }
 
 // ======================= DEBRIEF: course & decision analysis =======================
@@ -1033,13 +1094,30 @@ function dbRoundT(b,ci){ if(ci==null||ci<0) return null; const li=ciMap(b)[ci]; 
   const rr=b._mlegs?null:b.rounds; return rr&&rr[li]!=null?rr[li]:b.t[boatLegs(b)[li][1]]; }
 function isLastFor(b,ci){ const lg=boatLegs(b); return lg.length>0 && courseIdx(b,lg.length-1)===ci; }
 // b crossed the finish line at the end of course leg ci (retirees never "finish")
-function finishesAt(b,ci){ return !!b.summary.finished && isLastFor(b,ci); }
+function fleetFinCi(){ const r=S.race; if(r._finCi!=null) return r._finCi;
+  const c={}; for(const b of r.boats){ const lg=boatLegs(b); if(!b.summary.finished||!lg.length) continue;
+    const x=courseIdx(b,lg.length-1); if(x>=0) c[x]=(c[x]||0)+1; }
+  const k=Object.keys(c).sort((x,y)=>c[y]-c[x])[0]; return r._finCi=(k==null?-1:+k); }
+function finishesAt(b,ci){ return (officialPlace(b)!=null || !!b.summary.finished) && isLastFor(b,ci) && ci===fleetFinCi(); }
 function dbRankAtMark(b,i,pl){ const my=dbRoundT(b,i); if(my==null) return null; let r=1;
   for(const o of pl){ if(o===b) continue; const ot=dbRoundT(o,i); if(ot!=null&&ot<my) r++; } return r; }
 function dbRankAtT(b,t,pl){ const k=gk(t), my=boatCourse(b)[k]; if(my==null) return null; let r=1;
   for(const o of pl){ if(o===b) continue; const v=boatCourse(o)[k]; if(v!=null&&v>my) r++; } return r; }
-function dbFinishRank(b,pl){ const rt=b.summary.race_min; if(rt==null||!b.summary.finished) return null; let r=1;
-  for(const o of pl){ if(o!==b&&o.summary.finished&&o.summary.race_min!=null&&o.summary.race_min<rt) r++; } return r; }
+function dbFinishRank(b,pl){                     // within the same pool as the mark ranks
+  if(noFinish(officialScore(b))) return null;      // official DNF/UFD/DSQ...: no place
+  const gps=o=>o.summary.finished&&o.summary.race_min!=null?o.summary.race_min:null;
+  // official order, with the boats that have no official place (ZFP etc., unmatched sail)
+  // merged in by GPS finish time — one order, so no two boats share a place
+  const ok=pl.includes(b)?pl:pl.concat([b]), rest=ok.filter(o=>!noFinish(officialScore(o)));
+  const off=rest.filter(o=>officialPlace(o)!=null).sort((x,y)=>officialPlace(x)-officialPlace(y));
+  const oth=rest.filter(o=>officialPlace(o)==null&&gps(o)!=null).sort((x,y)=>gps(x)-gps(y));
+  const order=[]; let i=0;
+  for(const c of oth){                               // before the first placed boat that GPS has behind it
+    let j=i; while(j<off.length&&!(gps(off[j])!=null&&gps(off[j])>gps(c))) j++;
+    while(i<j) order.push(off[i++]);
+    order.push(c); }
+  while(i<off.length) order.push(off[i++]);
+  const k=order.indexOf(b); return k<0?null:k+1; }
 function windVecs(t){ const w=windAtT(t)*Math.PI/180;           // u = upwind, l = right looking upwind
   return {u:[Math.sin(w),Math.cos(w)], l:[Math.cos(w),-Math.sin(w)]}; }
 function countIn(arr,t0,t1,kind){ return (arr||[]).filter(m=>m.t>=t0&&m.t<=t1&&(!kind||m.kind===kind)).length; }
@@ -1296,7 +1374,18 @@ function debriefChecks(b){
   // ---------------- SERIES ----------------
   const series=(S.index||[]).map(x=>({i:x.i, race:x.race, rk:(x.boats||{})[b.sail]?.rank??null, n:(x.boats||{})[b.sail]?.n_fin}));
   const done=series.filter(x=>x.rk!=null);
-  if(done.length>=2){ const worst=done.reduce((p1,c1)=>c1.rk>p1.rk?c1:p1), here=series.find(x=>x.i===S.raceIdx), isD=here&&worst.i===here.i;
+  // official series: every scored column of the boat's row, tracked races or not
+  const R=S.results, orow=officialRow(b.sail), cur=curRaceId();
+  const colName=k=>{ const x=(S.index||[]).find(y=>y.id===R.map[k]); return x?x.race:'R'+(R.races||[])[k]; };
+  const ocols=orow?orow.scores.map((s,k)=>({k,s})).filter(x=>x.s):[], odisc=ocols.filter(x=>x.s.disc);
+  const pts=s=>s.pts!=null?s.pts:1e9;                // a code without points: worst
+  if(odisc.length){ const here=odisc.some(x=>R.map[x.k]===cur);
+    add('Series',here?'warn':'info','Discard (official)',`Discarded in the official results: ${odisc.map(x=>`${esc(colName(x.k))} (${scoreText(x.s)})`).join(', ')}. `+
+      (here?'This race is your discard — the next bad one will count, so keep the risk controlled.':'This race counts.')); }
+  else if(ocols.length>=2){ const worst=ocols.reduce((p1,c1)=>pts(c1.s)>pts(p1.s)?c1:p1), here=ocols.find(x=>R.map[x.k]===cur), isD=here&&worst.k===here.k;
+    add('Series',isD?'warn':'info','Discard (official)',`Worst official score so far (likely discard): ${esc(colName(worst.k))} ${scoreText(worst.s)}. `+
+      (isD?'This race is your discard — the next bad one will count, so keep the risk controlled.':`This race (${here?scoreText(here.s):'–'}) counts.`)); }
+  else if(done.length>=2){ const worst=done.reduce((p1,c1)=>c1.rk>p1.rk?c1:p1), here=series.find(x=>x.i===S.raceIdx), isD=here&&worst.i===here.i;
     add('Series',isD?'warn':'info','Discard',`Worst race so far (likely discard): ${worst.race} P${worst.rk}/${worst.n}. `+
       (isD?'This race is your discard — the next bad one will count, so keep the risk controlled.':`This race (P${here?.rk??'–'}) counts.`)); }
   return out;
@@ -1370,11 +1459,13 @@ async function loadIndex(rid, raceId){
     setBusy('Could not load that regatta: '+e.message); setTimeout(()=>setBusy(null),5000);
     $('#regSel').value=S.regatta||''; return; }
   if(tok!==S._ixTok) return;
+  let res=null; try{ res=(await api('/api/results/'+rid)).results; }catch(e){}
+  if(tok!==S._ixTok) return;                       // a newer regatta selection took over
   setBusy(null);
   S.regatta=rid; $('#regSel').value=rid; try{ localStorage.setItem('sa_regatta',rid); }catch(e){}
   const g=S.regattas.find(x=>x.id===rid);
   $('#regTitle').textContent=g?g.name:''; document.title='Sail Analyzer — '+(g?g.name:'');
-  S.index=idx;
+  S.index=idx; S.results=res;
   const rs=$('#raceSel'); rs.innerHTML='';
   S.index.forEach(r=>{ const o=document.createElement('option'); o.value=r.i;
     o.textContent=r.race+'  ·  wind '+r.wind_from+'°'; rs.appendChild(o); });

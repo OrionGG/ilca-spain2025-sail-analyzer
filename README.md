@@ -70,6 +70,13 @@ Click **Regattas…** in the top bar:
 5. **Add & analyse** — the race is parsed and appears in the **Race** list.
 
 **Edit** a race later to change its course/gun or replace its tracks; it is re-analysed.
+
+**Official results:** in the same dialog, paste the link of the regatta's results page
+(e.g. Sailti) under *Official results* and click **Download**. Each results column is
+matched to a race (in order; change it in the table if needed). Finish places in the
+Overview, Debrief, Position and Regatta tabs then use the official results (penalties,
+UFD/BFD, DNF, discards), with the GPS estimate shown alongside; the Regatta tab also
+shows the full official table.
 The regatta list lives in `sail_analyzer/regattas.json` (local, not committed). The
 bundled Copa de España 2025 races are registered automatically on first run.
 
@@ -125,6 +132,7 @@ sail_analyzer/
   static/           offline single-page UI (no CDN); manage.js = Regattas manager
   cache/            generated per-race JSON (gitignored; rebuilt when stale)
   data/             uploaded KML copies of your own races (gitignored)
+  results.py        official-results download + parser (Sailti / HTML results tables)
   regattas.json     your regatta/race list (gitignored; Copa 2025 seeded on first run)
 01_Prueba 1/ … 09_Prueba 9/   the 49 boats × 9 races of KML tracks
 Run Sail Analyzer.bat         Windows one-click launcher

@@ -5,6 +5,9 @@ Run:  python app.py        (parses all races once, caches, opens browser)
       python app.py --rebuild   (force re-parse)
       python app.py --port 8000
 
+Official results can be downloaded per regatta from a results-page URL (stored in
+data/<regatta>/results.json) and are used as the reference for finish places.
+
 Regattas and races are managed from the UI ("Regattas" button): each race is a
 folder of TracTrac KML tracks (uploaded copies live in data/) plus its course
 (leg types + marks) and an optional gun time. The list is kept in
@@ -35,6 +38,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import numpy as np
 
 import regatta as R
+import results as RS
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.dirname(HERE)               # the folder with 01_Prueba 1 ...
@@ -315,12 +319,60 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
             rounds.append(float(b.t[k0 + j])); k0 = k0 + j + 1
         rounds_by_sail[b.sail] = rounds
 
+    # ---- finish line where the finishers' tracks converge (between the committee boat
+    # and the pin; they spread out again as they keep sailing). Boats crossing it get that
+    # finish time (a finisher passing just outside its ends: the line extended); without such a
+    # line (e.g. tracking stopped first) the estimate stays.
+    gps_finish = set()
+    pci = (len(course) - 2 if fin_ci >= len(course) - 2 else fin_ci - 1) if fin_ci is not None else None
+    if pci is not None and pci >= 0 and _mk.get(course[pci]["mark"]):
+        starts = {}
+        for b in boats:
+            li = next((i for i, c in enumerate(cix_by_sail[b.sail]) if c == pci), None)
+            if li is not None and rounds_by_sail[b.sail][li] is not None:
+                starts[b.sail] = rounds_by_sail[b.sail][li]
+            elif finished[b.sail] and legs_by_sail[b.sail] and cix_by_sail[b.sail] \
+                    and cix_by_sail[b.sail][-1] == fin_ci:      # no rounding pass seen: its final leg's start
+                starts[b.sail] = float(b.t[legs_by_sail[b.sail][-1][0]])
+        fins = [b for b in boats if finished[b.sail]]
+        if fins:
+            target = np.median([(b.x[legs_by_sail[b.sail][-1][1]], b.y[legs_by_sail[b.sail][-1][1]])
+                                for b in fins], axis=0)
+            conv = R.finish_by_convergence(boats, starts, np.mean(_mk[course[pci]["mark"]], axis=0),
+                                           target, {b.sail for b in fins})
+            # sanity: a real line is crossed no later than the previous estimate (which runs late,
+            # to the leg end); a course shortened at its last mark would put a "line" in
+            # post-finish sailing, i.e. clearly later
+            dt = [t - finish_t[s] for s, t in (conv or {}).get("times", {}).items()
+                  if s in finish_t and cix_by_sail[s] and cix_by_sail[s][-1] == fin_ci]
+            if conv and dt and float(np.median(dt)) <= 60.0:
+                for b in boats:
+                    lg, ft = legs_by_sail[b.sail], conv["times"].get(b.sail)
+                    if ft is None and finished[b.sail]:
+                        ft = conv["near"].get(b.sail)
+                    # only a boat that sailed the final leg finishes by crossing (a retiree
+                    # sailing home through the finish area doesn't)
+                    if ft is None or not lg or not cix_by_sail[b.sail] or cix_by_sail[b.sail][-1] != fin_ci:
+                        continue
+                    a, _c, k = lg[-1]                 # the last leg (and race window) ends at the line
+                    legs_by_sail[b.sail] = lg[:-1] + [(a, max(a + 1, min(int(np.searchsorted(b.t, ft)), len(b.t) - 1)), k)]
+                    rounds_by_sail[b.sail][-1] = ft
+                    finish_t[b.sail] = ft
+                    finished[b.sail] = True
+                    gps_finish.add(b.sail)
+                fl = course[-1]["mark"]
+                to_ll = lambda px, py: [lat0 + py / 111320.0, lon0 + px / (111320.0 * cosLat)]
+                marks = [m for m in marks if m["label"] != fl] + [{"label": fl, "ll": to_ll(*e)} for e in conv["ends"]]
+
     # ---- tactical inputs: wind-shadow exposure (all boats) + penalty-turn candidates ----
     shadow = R.dirty_air(boats, grid, wind_series)
     penalties = {b.sail: R.detect_penalty_turns(b, gun_t + 20.0, finish_t.get(b.sail, float(b.t[-1])))
                  for b in boats}
 
     # fleet aggregate stats on the grid (FINISHERS only — exclude retirees/DNF)
+    ref = [b for b in boats if finished[b.sail]]  # incl. boats seen crossing the finish line
+    if len(ref) < 3:
+        ref = boats
     sog_grid, vmg_grid = [], []
     for b in ref:                                 # finishers (every boat if fewer than 3)
         sog_grid.append(np.interp(grid, b.t, b.sog, left=np.nan, right=np.nan))
@@ -351,7 +403,7 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
         gybes = [m for m in mans if m.kind == "gybe"]
         summary = {
             "n": int(fi - gi + 1),
-            "n_legs": len(legs), "finished": finished[b.sail],
+            "n_legs": len(legs), "finished": finished[b.sail], "gps_finish": b.sail in gps_finish,
             "race_min": round(float(finish_t.get(b.sail, b.t[fi]) - gun_t) / 60.0, 2),
             "dist_nm": round(dist_m / 1852.0, 2),
             "sog_mean": round(float(sog_s.mean()), 2),
@@ -536,6 +588,10 @@ def race_dir_abs(race):
     return d if os.path.isabs(d) else os.path.normpath(os.path.join(HERE, d))
 
 
+def results_path(rid):
+    return os.path.join(UPLOAD_DIR, rid, "results.json")
+
+
 def upload_dir_for(rid, race_id):
     return os.path.join(UPLOAD_DIR, rid, race_id)
 
@@ -656,18 +712,22 @@ def store_race_cache(rid, race, data, cfg):
                                               "entry": index_entry(0, race["id"], data)})
 
 
+def remove_file(path):
+    for attempt in range(20):                     # Windows: a reader may hold the file open
+        try:
+            os.remove(path)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise
+            threading.Event().wait(0.05)
+
+
 def drop_race_cache(rid, race_id):
     for f in (race_cache_path(rid, race_id), _meta_path(rid, race_id)):
-        for attempt in range(20):                 # Windows: a reader may hold the file open
-            try:
-                os.remove(f)
-                break
-            except FileNotFoundError:
-                break
-            except PermissionError:
-                if attempt == 19:
-                    raise
-                threading.Event().wait(0.05)
+        remove_file(f)
 
 
 class AnalysisError(ValueError):
@@ -829,7 +889,9 @@ def registry_view():
                           "n_files": len(kml_files(r)), "uploaded": is_upload_dir(race_dir_abs(r)),
                           "analysed": os.path.exists(race_cache_path(rg["id"], r["id"])),
                           "error": meta.get("error")})
-        out.append({"id": rg["id"], "name": rg["name"], "races": races})
+        res = rg.get("results")
+        out.append({"id": rg["id"], "name": rg["name"], "races": races,
+                    "results": {k: res.get(k) for k in ("url", "fetched", "columns", "n", "map")} if res else None})
     return {"regattas": out, "templates": [{**t, "course": parse_legs(t["legs"])} for t in TEMPLATES]}
 
 
@@ -879,6 +941,14 @@ class Handler(BaseHTTPRequestHandler):
         if m:
             idx = ensure_cache(m.group(1))        # stat-only when nothing changed
             return self._json(idx) if idx is not None else self._err("unknown regatta", 404)
+        m = re.fullmatch(r"/api/results/([a-z0-9-]+)", path)
+        if m:
+            with REG_RMW:                                 # written together (download / delete)
+                rg = find_regatta(load_registry(), m.group(1))
+                data = _read_json(results_path(rg["id"])) if rg and rg.get("results") else None
+            if rg is None:
+                return self._err("unknown regatta", 404)
+            return self._json({"ok": True, "results": {**rg["results"], **data} if data else None})
         m = re.fullmatch(r"/api/race/([a-z0-9-]+)/([a-z0-9-]+)", path)
         if m:
             rid = m.group(1)
@@ -960,6 +1030,48 @@ class Handler(BaseHTTPRequestHandler):
         rid = parts[2] if len(parts) > 2 else ""
         if not _safe_id(rid) or find_regatta(load_registry(), rid) is None:
             return self._err("unknown regatta", 404)
+        if parts[3:] == ["results"]:                                      # download official results
+            url = str(body.get("url", "")).strip()
+            res = RS.fetch_results(url)                   # network: outside any lock
+
+            def save(reg):                                # the file and its registry entry together
+                g = find_regatta(reg, rid)
+                if g is None:
+                    raise ValueError("unknown regatta")
+                _write_json(results_path(rid), {"races": res["races"], "rows": res["rows"]})
+                default_map = [g["races"][i]["id"] if i < len(g["races"]) else None for i in range(len(res["races"]))]
+                old = g.get("results") or {}
+                by_name = dict(zip(old.get("columns") or [], old.get("map") or []))
+                mp = [by_name[c] if c in by_name else None for c in res["races"]]
+                used = {m for m in mp if m}
+                for i, c in enumerate(res["races"]):          # new columns: positional default if free
+                    if c not in by_name and default_map[i] and default_map[i] not in used:
+                        mp[i] = default_map[i]
+                        used.add(mp[i])
+                g["results"] = {"url": url, "fetched": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                                "columns": res["races"], "n": len(res["rows"]), "map": mp}
+            edit_registry(save)
+            return self._json({"ok": True, "n": len(res["rows"]), "columns": res["races"]})
+        if parts[3:] == ["results", "map"]:                               # result column -> race
+            def set_map(reg):
+                g = find_regatta(reg, rid)
+                if g is None or not g.get("results"):
+                    raise ValueError("No official results for this regatta.")
+                ids = {r["id"] for r in g["races"]}
+                mp = body.get("map")
+                if not isinstance(mp, list) or len(mp) != len(g["results"]["columns"]):
+                    raise ValueError("Bad results mapping.")
+                g["results"]["map"] = [m if m in ids else None for m in mp]
+            edit_registry(set_map)
+            return self._json({"ok": True})
+        if parts[3:] == ["results", "delete"]:
+            def drop(reg):
+                g = find_regatta(reg, rid)
+                if g is not None:
+                    g.pop("results", None)
+                remove_file(results_path(rid))
+            edit_registry(drop)
+            return self._json({"ok": True})
         if parts[3:] == ["rename"]:
             name = clean_text(body.get("name"), 80)
             if not name:

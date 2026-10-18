@@ -35,6 +35,7 @@ function renderManager(msg){
     });
     if(!g.races.length) h += `<tr><td colspan=5 class="muted" style="text-align:left">No races yet.</td></tr>`;
     h += `</table><div style="margin-top:8px"><button class="btn primary" id="mgAdd">+ Add race</button></div>`;
+    h += resultsBox(g);
   } else h += `<div class="muted">Create a regatta to start.</div>`;
   h += `<div id="mgForm"></div><div id="mgMsg" class="muted" style="margin-top:8px">${msg?esc(msg):''}</div>`;
   body.innerHTML = h;
@@ -49,6 +50,7 @@ function renderManager(msg){
       MG.form = {mode:'edit', id:r.id, name:r.name, course:r.course.map(l=>({...l})), gun:r.gun||'', files:[], folder:''};
       renderForm(); });
     body.querySelectorAll('[data-del]').forEach(b => b.onclick = () => deleteRace(b.dataset.del));
+    wireResultsBox(g);
   }
   if(MG.form) renderForm();
 }
@@ -167,6 +169,50 @@ async function saveRace(){
     await fetchRegattas();
     mgStatus('Error: '+e.message+' — fix it and save again.');
   }
+}
+
+// Official results: download from the regatta's results page, map result columns to races
+function resultsBox(g){
+  const R = g.results;
+  let h = `<div class="sectitle">Official results</div>
+    <div class="filterbar"><input id="mgResUrl" size="52" placeholder="link to the results page (e.g. Sailti)" value="${esc(R&&R.url||'')}">
+    <button class="btn primary" id="mgResGet">${R?'Download again':'Download'}</button>${R?'<button class="btn danger" id="mgResDel">Remove</button>':''}</div>`;
+  if(R){
+    h += `<div class="muted">${R.n} boats, ${R.columns.length} race columns · downloaded ${esc((R.fetched||'').replace('T',' ').slice(0,16))} UTC.
+      Finish places in the analysis use these results; the GPS estimate is shown alongside.</div>
+      <table class="mgt" style="margin-top:6px"><tr><th>Results column</th><th style="text-align:left">Race</th></tr>`+
+      R.columns.map((c,i)=>`<tr><td>${esc(c)}</td><td><select data-rmap="${i}"><option value="">— not a tracked race —</option>`+
+        g.races.map(r=>`<option value="${r.id}" ${R.map[i]===r.id?'selected':''}>${esc(r.name)}</option>`).join('')+`</select></td></tr>`).join('')+'</table>';
+  }
+  return h;
+}
+function wireResultsBox(g){
+  $('#mgResGet').onclick = async () => {
+    const url = $('#mgResUrl').value.trim(); if(!url) return mgStatus('Paste the link of the results page.');
+    $('#mgResGet').disabled = true; mgStatus('Downloading results…');
+    try{ const j = await api(`/api/regatta/${g.id}/results`, {url}); await fetchRegattas(); await reloadResults(g.id);
+      renderManager(`Official results downloaded: ${j.n} boats, ${j.columns.length} races.`); }
+    catch(e){ $('#mgResGet').disabled = false; mgStatus('Error: '+e.message); }
+  };
+  const del = $('#mgResDel');
+  if(del) del.onclick = async () => {
+    if(!confirm('Remove the official results of this regatta?')) return;
+    try{ await api(`/api/regatta/${g.id}/results/delete`, {}); await fetchRegattas(); await reloadResults(g.id); renderManager('Official results removed.'); }
+    catch(e){ mgStatus('Error: '+e.message); }
+  };
+  document.querySelectorAll('#mgBody [data-rmap]').forEach(sel => sel.onchange = async () => {
+    const map = [...document.querySelectorAll('#mgBody [data-rmap]')].map(x => x.value || null);
+    try{ await api(`/api/regatta/${g.id}/results/map`, {map}); await fetchRegattas(); await reloadResults(g.id); mgStatus('Mapping saved.'); }
+    catch(e){ mgStatus('Error: '+e.message); }
+  });
+}
+async function reloadResults(rid){
+  if(S.regatta !== rid) return;
+  const tok = S._ixTok;
+  let res = null; try{ res = (await api('/api/results/'+rid)).results; }catch(e){}
+  if(S.regatta !== rid || tok !== S._ixTok) return;     // another regatta (or a reload) took over
+  S.results = res;
+  if(S.race) setTab(S.tab);
 }
 
 async function newRegatta(){
