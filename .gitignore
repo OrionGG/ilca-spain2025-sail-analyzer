@@ -1,6 +1,11 @@
 # Generated analysis cache (regenerated from KML on first run)
 sail_analyzer/cache/
 
+# Local regatta list + uploaded KML copies (managed from the UI)
+sail_analyzer/regattas.json
+sail_analyzer/*.tmp
+sail_analyzer/data/
+
 # Claude Code local config
 .claude/
 

@@ -3,12 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ILCA Sail Analyzer — Copa de España 2025</title>
+<title>Sail Analyzer</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header>
-  <h1>⛵ Sail Analyzer <small>Copa de España ILCA 7 2025</small></h1>
+  <h1>⛵ Sail Analyzer <small id="regTitle"></small></h1>
+  <div class="ctrl">Regatta
+    <select id="regSel"></select>
+    <button class="btn" id="mgBtn" title="Create regattas, add races from a folder of KML tracks, set each race's course">Regattas…</button>
+  </div>
   <div class="ctrl">Race
     <select id="raceSel"></select>
   </div>
@@ -73,6 +77,15 @@
   </section>
 </main>
 
+<div id="busy" style="display:none"></div>
+<div id="mgModal" class="modal" style="display:none">
+  <div class="mbox">
+    <div class="mhead"><b>Regattas &amp; races</b><button class="btn" id="mgClose">✕</button></div>
+    <div class="mbody" id="mgBody"></div>
+  </div>
+</div>
+
 <script src="/static/app.js"></script>
+<script src="/static/manage.js"></script>
 </body>
 </html>

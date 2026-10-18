@@ -6,7 +6,8 @@ estimated from the tracks, maneuver-loss in boatlengths, start and fleet-positio
 
 It ships with the full **Copa de España ILCA 7 2025** (Altea) dataset — 49 boats × 9 races
 of TracTrac GPS tracks — built around boat **206341 · O. GARCIA GALL**, but any boat in
-the fleet can be the focus.
+the fleet can be the focus. You can add **your own regattas and races** from the UI
+(any folder of TracTrac KML tracks, any course shape).
 
 ---
 
@@ -32,8 +33,9 @@ cd ilca-spain2025-sail-analyzer
 python sail_analyzer/app.py
 ```
 
-The first launch parses the 441 KML files once (~20 s) and caches the result, then your
-browser opens automatically at **http://127.0.0.1:8765**. Later launches are instant.
+Your browser opens automatically at **http://127.0.0.1:8765**. The first time a regatta is
+opened its KML files are parsed once (~20 s for the 441 bundled tracks) and cached; later
+opens are instant.
 
 > **Windows shortcut:** instead of the command line, just double-click
 > **`Run Sail Analyzer.bat`** in the project root.
@@ -47,6 +49,29 @@ browser opens automatically at **http://127.0.0.1:8765**. Later launches are ins
 | `python sail_analyzer/app.py --rebuild` | Force a re-parse of the KML files |
 
 Press **Ctrl+C** in the terminal to stop the server.
+
+---
+
+## ➕ Analyse your own regattas
+
+Click **Regattas…** in the top bar:
+
+1. **+ New regatta** — give it a name.
+2. **+ Add race** — choose the **folder with the race's KML tracks** (one TracTrac `.kml`
+   per boat, e.g. `206341-O_GARCIA GALL.kml`). The files are copied into the app
+   (`sail_analyzer/data/`), so the original folder can move later.
+3. **Course** — start from a template (trapezoid outer/inner, windward-leeward 2/3 laps,
+   wing-mark moved 2a/2b) or **copy from a previous race**, then edit the leg table:
+   each leg's type (upwind / reach / downwind), the mark it ends at, and whether that mark
+   is a gate. The last leg ends at the finish. Same label = same mark rounded again; a
+   moved mark gets its own label. Shortened races are detected automatically.
+4. **Gun time** (optional, UTC `HH:MM:SS`) — leave empty to auto-detect; set it when the
+   tracking starts long before the gun.
+5. **Add & analyse** — the race is parsed and appears in the **Race** list.
+
+**Edit** a race later to change its course/gun or replace its tracks; it is re-analysed.
+The regatta list lives in `sail_analyzer/regattas.json` (local, not committed). The
+bundled Copa de España 2025 races are registered automatically on first run.
 
 ---
 
@@ -95,10 +120,12 @@ approximate — the relative comparisons are the trustworthy part.
 
 ```
 sail_analyzer/
-  app.py            local HTTP server + per-race JSON cache builder (stdlib only)
-  regatta.py        analytics engine (parsing, wind, VMG, maneuvers, legs, start)
-  static/           offline single-page UI (no CDN)
-  cache/            generated per-race JSON (gitignored; rebuilt on first run)
+  app.py            local HTTP server, regatta/race registry + upload API, cache builder
+  regatta.py        analytics engine (parsing, wind, VMG, maneuvers, legs, marks, start)
+  static/           offline single-page UI (no CDN); manage.js = Regattas manager
+  cache/            generated per-race JSON (gitignored; rebuilt when stale)
+  data/             uploaded KML copies of your own races (gitignored)
+  regattas.json     your regatta/race list (gitignored; Copa 2025 seeded on first run)
 01_Prueba 1/ … 09_Prueba 9/   the 49 boats × 9 races of KML tracks
 Run Sail Analyzer.bat         Windows one-click launcher
 ```

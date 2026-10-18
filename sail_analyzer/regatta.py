@@ -430,7 +430,7 @@ def detect_maneuvers(b: Boat, wind_from):
 
 
 # --------------------------------------------------------------------------- #
-# Leg segmentation — matches the KNOWN course template (trapezoid w/ reaches)
+# Leg segmentation — fits the race's course template (leg types) to each track
 # --------------------------------------------------------------------------- #
 # Modes: 0 = upwind, 1 = reach, 2 = downwind
 _MODE = {"U": 0, "R": 1, "D": 2}
@@ -460,7 +460,9 @@ def detect_gun(boats, wind_from):
     and surges upwind together. We find that onset from the fleet-median upwind
     VMG and snap to the nearest round clock-minute (starts are set on the minute).
     """
-    t0 = min(b.t[0] for b in boats)
+    # window from the 25th percentile of track starts: a few trackers switched on early
+    # can't shift it, nor can some switched on after the gun
+    t0 = float(np.percentile([b.t[0] for b in boats], 25))
     grid = np.arange(t0, t0 + 900, 5.0)              # first 15 min
     V = [np.interp(grid, b.t, b.vmg, left=np.nan, right=np.nan)
          for b in boats if b.vmg is not None]
@@ -474,19 +476,29 @@ def detect_gun(boats, wind_from):
     return float(round(gun / 60.0) * 60.0)               # snap to the clock minute
 
 
-def segment_legs(b: Boat, wind_from, template=("U", "R", "D", "U", "D", "R"), gun_t=None):
+def segment_legs(b: Boat, wind_from, template=("U", "R", "D", "U", "D", "R"), gun_t=None,
+                 with_index=False):
     """
-    Split the race into the legs of the KNOWN course (trapezoid w/ reaches) by
-    fitting the template's mode sequence to the track with dynamic programming.
-
-    Course: start -U-> mark1 -R-> mark2 -D-> gate -U-> mark2 -D-> gate -R->
-    finish. Leg 1 is anchored at the gun (`gun_t`) so the pre-start is excluded;
-    the DP labels the legs and a free trailing segment drops post-finish sailing,
-    so shortened races (e.g. Prueba 6 = 5 legs) fall out without hardcoding.
+    Split the race into the legs of the race's course by fitting the template's
+    leg-type sequence (U/R/D, e.g. the trapezoid U,R,D,U,D,R) to the track with
+    dynamic programming. Leg 1 is anchored at the gun (`gun_t`) so the pre-start
+    is excluded; the DP labels the legs and a free trailing segment drops
+    post-finish sailing, so shortened races (fewer legs) fall out on their own.
+    `with_index=True` also returns each leg's template index (None for the
+    template-free fallback split).
     """
     if b.vmg is None or len(b.t) < 30:
-        return []
-    tmpl = [_MODE[c] for c in template]
+        return ([], []) if with_index else []
+    # consecutive legs of the same type (e.g. the two reaches of a triangle) can't be
+    # told apart by sailing mode: fit them as one block, then split the block at its
+    # sharpest turns (the marks between them)
+    groups = []                                      # [type, first template index, count]
+    for k, c in enumerate(template):
+        if groups and groups[-1][0] == c:
+            groups[-1][2] += 1
+        else:
+            groups.append([c, k, 1])
+    tmpl = [_MODE[gr[0]] for gr in groups]
     K = len(tmpl)
     n = len(b.t)
     mode = _mode_array(b)
@@ -518,11 +530,17 @@ def segment_legs(b: Boat, wind_from, template=("U", "R", "D", "U", "D", "R"), gu
     for k in range(K - 1, -1, -1):
         bounds[k] = back[k][bounds[k + 1]]
 
-    legs = []
-    for k in range(K):
-        a, c = bounds[k], bounds[k + 1]
-        if c - a >= 2:
-            legs.append((a, min(c, n - 1), _KIND[tmpl[k]]))
+    legs, ks = [], []
+    for gi in range(K):
+        a, c = bounds[gi], min(bounds[gi + 1], n - 1)
+        if c - a < 2:
+            continue
+        typ, k0, cnt = groups[gi]
+        edges = [a] + _block_splits(b, wind_from, typ, a, c, cnt) + [c]
+        for j in range(len(edges) - 1):
+            if edges[j + 1] - edges[j] >= 2:
+                legs.append((edges[j], edges[j + 1], _KIND[tmpl[gi]]))
+                ks.append(k0 + j)
 
     # Trim the final leg at peak progress along its own axis: after the finish a
     # boat turns back (to shore / milling), so projection onto the leg direction
@@ -539,42 +557,73 @@ def segment_legs(b: Boat, wind_from, template=("U", "R", "D", "U", "D", "R"), gu
                 cmax = a + int(np.argmax(proj))
                 if a + 2 <= cmax < c:
                     legs[-1] = (a, cmax, kind)
-    return legs if len(legs) >= 2 else _segment_legs_vmg(b)
+    if len(legs) < 2:
+        legs, ks = _segment_legs_vmg(b, g0), None
+    return (legs, ks) if with_index else legs
 
 
-def _med_xy(pts):
-    if len(pts) < 3:
+def _block_splits(b, wind_from, typ, a, c, cnt, w=4, edge_s=60.0, min_turn=45.0):
+    """Split indices for a block of cnt consecutive same-type legs over [a, c].
+
+    Candidates stay >= edge_s from the block ends (the fitted boundaries lag the real
+    roundings, whose turns would otherwise win). Two beats split at the furthest-upwind
+    point and two runs at the furthest-downwind point (a tack/gybe turns more than the
+    mark between them); otherwise at the sharpest turns of >= min_turn degrees, >= 60 s
+    apart. Fewer cuts are returned when the block doesn't show them (shortened race)."""
+    if cnt <= 1:
+        return []
+    lo = int(np.searchsorted(b.t, b.t[a] + edge_s)); hi = int(np.searchsorted(b.t, b.t[c] - edge_s))
+    lo, hi = max(lo, a + w), min(hi, c - w)
+    if hi - lo < 2:
+        return []
+    if typ in ("U", "D") and cnt == 2:
+        wf = math.radians(wind_from)
+        p = b.x[lo:hi] * math.sin(wf) + b.y[lo:hi] * math.cos(wf)
+        j = int(np.argmax(p) if typ == "U" else np.argmin(p))
+        return [lo + j] if 3 <= j < len(p) - 3 else []   # extreme at a block end: one leg only
+    # persistent heading change: mean heading over 10-30 s after vs before, so a penalty
+    # spin (which ends on its old heading) doesn't count as a mark rounding
+    rad = np.radians(b.cog)
+    cs = np.concatenate([[0.0], np.cumsum(np.cos(rad))]); sn = np.concatenate([[0.0], np.cumsum(np.sin(rad))])
+    idx = np.arange(lo, hi)
+    def mean_head(i0, i1):
+        i0 = np.clip(i0, 0, len(rad)); i1 = np.clip(i1, 0, len(rad))
+        return np.degrees(np.arctan2(sn[i1] - sn[i0], cs[i1] - cs[i0]))
+    turn = np.abs(wrap180(mean_head(idx + 3, idx + 10) - mean_head(idx - 10, idx - 3)))
+    cuts = []
+    for o in np.argsort(-turn):
+        if turn[o] < min_turn:
+            break
+        i = int(idx[o])
+        if all(abs(b.t[i] - b.t[x]) >= 60 for x in cuts):
+            cuts.append(i)
+            if len(cuts) == cnt - 1:
+                break
+    return sorted(cuts)
+
+
+def course_index(course, legs):
+    """Course leg index for each of a boat's legs when the split didn't come from
+    the course template (fallback): its n-th leg of a type is the course's n-th
+    leg of that type (None where the course has no such leg)."""
+    pos, seen = {}, {}
+    for ci, leg in enumerate(course):
+        pos[(leg["type"], seen.get(leg["type"], 0))] = ci
+        seen[leg["type"]] = seen.get(leg["type"], 0) + 1
+    letter = {_KIND[m]: t for t, m in _MODE.items()}
+    out, cnt = [], {}
+    for (_a, _c, kind) in legs:
+        t = letter.get(kind)
+        out.append(pos.get((t, cnt.get(t, 0))))
+        cnt[t] = cnt.get(t, 0) + 1
+    return out
+
+
+def _med_xy(pts, need=3):
+    if len(pts) < need or not pts:
         return None
     P = np.array(pts, float)
     return [float(np.median(P[:, 0])), float(np.median(P[:, 1]))]
-
-
-def _upwind_legs(legs):   return [i for i, (a, c, k) in enumerate(legs) if k == "upwind"]
-def _downwind_legs(legs): return [i for i, (a, c, k) in enumerate(legs) if k == "downwind"]
-
-
-def detect_windward_mark(boats, legs_by_sail, ux, uy):
-    """Mark 1 = each boat's furthest-upwind point on the FIRST beat; fleet median."""
-    pts = []
-    for b in boats:
-        legs = legs_by_sail.get(b.sail) or []
-        up = _upwind_legs(legs)
-        if up and b.x is not None:
-            a, c, _ = legs[up[0]]; p = b.x * ux + b.y * uy
-            j = a + int(np.argmax(p[a:c + 1])); pts.append((b.lat[j], b.lon[j]))
-    return _med_xy(pts)
-
-
-def detect_wing_mark(boats, legs_by_sail, ux, uy):
-    """Mark 2 (wing) = each boat's furthest-upwind point on the SECOND beat."""
-    pts = []
-    for b in boats:
-        legs = legs_by_sail.get(b.sail) or []
-        up = _upwind_legs(legs)
-        if len(up) >= 2 and b.x is not None:
-            a, c, _ = legs[up[1]]; p = b.x * ux + b.y * uy
-            j = a + int(np.argmax(p[a:c + 1])); pts.append((b.lat[j], b.lon[j]))
-    return _med_xy(pts)
 
 
 def _refine_turn(b, idx, win=12):
@@ -588,99 +637,119 @@ def _refine_turn(b, idx, win=12):
     return bj
 
 
-def _wing_rounding(boats, legs_by_sail, nth):
-    """Wing-mark rounding at the bear-away starting the nth (0/1) downwind run."""
-    pts = []
-    for b in boats:
-        legs = legs_by_sail.get(b.sail) or []
-        dn = _downwind_legs(legs)
-        if len(dn) > nth and b.x is not None:
-            j = _refine_turn(b, legs[dn[nth]][0])
-            pts.append((b.lat[j], b.lon[j]))
-    return _med_xy(pts)
-
-
-def detect_gate(boats, legs_by_sail, ux, uy, lx, ly):
-    """Leeward gate = furthest-downwind point of each run; split into two buoys
-    when the cross-wind rounding positions are clearly bimodal. Returns 1-2 lls."""
-    pts = []
-    for b in boats:
-        legs = legs_by_sail.get(b.sail) or []
-        if b.x is None:
-            continue
-        p = b.x * ux + b.y * uy
-        for di in _downwind_legs(legs):
-            a, c, _ = legs[di]; j = a + int(np.argmin(p[a:c + 1]))
-            pts.append((b.lat[j], b.lon[j], float(b.x[j] * lx + b.y[j] * ly)))
-    if len(pts) < 6:
-        gm = _med_xy([(la, lo) for la, lo, _ in pts])
-        return [gm] if gm else []
-    cw = np.sort(np.array([g[2] for g in pts]))
-    gaps = np.diff(cw)
-    if len(gaps) and gaps.max() > 80:                 # two distinct buoys
-        split = cw[int(np.argmax(gaps))] + gaps.max() / 2
-        out = []
-        for grp in ([(la, lo) for la, lo, c in pts if c < split],
-                    [(la, lo) for la, lo, c in pts if c >= split]):
-            gm = _med_xy(grp)
-            if gm:
-                out.append(gm)
-        return out
-    gm = _med_xy([(la, lo) for la, lo, _ in pts])
-    return [gm] if gm else []
-
-
-def detect_finish(boats, legs_by_sail):
+def detect_finish(boats, legs_by_sail, need=3):
     """Finish ~ end of the last detected leg, fleet median."""
     pts = []
     for b in boats:
         legs = legs_by_sail.get(b.sail) or []
         if legs:
             pts.append((b.lat[legs[-1][1]], b.lon[legs[-1][1]]))
-    return _med_xy(pts)
+    return _med_xy(pts, need)
 
 
-def detect_marks(boats, wind_from, legs_by_sail, split_wing=False):
+def _split_gate(pts, need=3):
+    """Gate buoys from (lat, lon, crosswind) rounding points: two buoys when the
+    cross-wind positions are clearly bimodal (gap > 80 m between two groups of
+    at least 15% of the roundings each), else one."""
+    if len(pts) < 6:
+        gm = _med_xy([(la, lo) for la, lo, _ in pts], need)
+        return [gm] if gm else []
+    cw = np.sort(np.array([g[2] for g in pts]))
+    gaps = np.diff(cw)
+    n = len(cw)
+    m = max(3, int(0.15 * n))                     # a split must leave >= m roundings each side,
+    cand = gaps[m - 1:n - m] if n >= 2 * m else gaps[:0]   # so a stray point can't decide it
+    if len(cand) and cand.max() > 80:
+        k = m - 1 + int(np.argmax(cand))
+        split = cw[k] + gaps[k] / 2
+        out = []
+        for grp in ([(la, lo) for la, lo, c in pts if c < split],
+                    [(la, lo) for la, lo, c in pts if c >= split]):
+            gm = _med_xy(grp, need)
+            if gm:
+                out.append(gm)
+        return out
+    gm = _med_xy([(la, lo) for la, lo, _ in pts], need)
+    return [gm] if gm else []
+
+
+def detect_marks(boats, wind_from, legs_by_sail, course, cix_by_sail):
     """
-    Locate the course marks at the fleet's actual rounding points by calling a
-    dedicated detector per mark. Returns a list of {"label","ll":[lat,lon]}.
-    `split_wing`: the wing mark was moved between the two roundings (e.g. Prueba
-    2 & 5), so report 2a (1st rounding) and 2b (2nd) instead of a single 2.
+    Locate the course marks at the fleet's actual rounding points, driven by the
+    race's course definition: a list of legs {"type": U|R|D, "mark": label,
+    "gate": bool}, each ending at its mark; the last leg ends at the finish.
+
+    Each boat's legs are matched to course legs by `cix_by_sail` (course leg
+    index per boat leg, None for legs outside the course). Candidate rounding points per boat: the
+    furthest-upwind point of a beat / furthest-downwind point of a run, and the
+    turn apex at the leg end. Per mark the candidate the fleet's tracks pass
+    closest to wins (beats into the top mark favour the furthest-upwind point,
+    beats into a wing mark the bear-away apex). Gates use the furthest-downwind
+    points, split into two buoys when the fleet used both.
+    Returns a list of {"label", "ll": [lat, lon]}.
     """
     wf = math.radians(wind_from)
     ux, uy = math.sin(wf), math.cos(wf)
     lx, ly = uy, -ux                                  # cross-wind (along line)
+    K = len(course)
+    fin_label = course[-1]["mark"] if K else "F"
+    gate, order = {}, []
+    for leg in course[:-1]:
+        L = leg["mark"]
+        gate[L] = gate.get(L, False) or bool(leg.get("gate"))
+        if L not in order:
+            order.append(L)
+    cand = {L: {"ext": [], "apex": []} for L in order}
+    wins = {L: [] for L in order}                     # (boat, i0, i1) track spans around the rounding
+    for b in boats:
+        legs = legs_by_sail.get(b.sail) or []
+        if b.x is None or not legs:
+            continue
+        p = b.x * ux + b.y * uy
+        for li, ci in enumerate(cix_by_sail[b.sail]):
+            if ci is None or ci >= K - 1:             # unmatched leg / the finish leg
+                continue
+            a, c, _ = legs[li]
+            L, T = course[ci]["mark"], course[ci]["type"]
+            if T in ("U", "D"):
+                j = a + int(np.argmax(p[a:c + 1]) if T == "U" else np.argmin(p[a:c + 1]))
+                cand[L]["ext"].append((b.lat[j], b.lon[j], float(b.x[j] * lx + b.y[j] * ly)))
+            j = _refine_turn(b, c)
+            cand[L]["apex"].append((b.lat[j], b.lon[j], float(b.x[j] * lx + b.y[j] * ly)))
+            nxt = legs[li + 1][1] if li + 1 < len(legs) else min(len(b.t) - 1, c + 60)
+            wins[L].append((b, a, nxt))
+
+    def closest_pass(ll, spans):
+        d = [float(np.min(np.hypot(*to_xy(b.lat[i0:i1 + 1], b.lon[i0:i1 + 1], ll[0], ll[1])[:2])))
+             for b, i0, i1 in spans if i1 > i0]
+        return float(np.median(d)) if d else float("inf")
+
+    need = min(3, len(boats))                     # tiny fleets (e.g. 2 training boats) still get marks
     marks = []
-    m1 = detect_windward_mark(boats, legs_by_sail, ux, uy)
-    if m1:
-        marks.append({"label": "1", "ll": m1})
-    if split_wing:
-        a2 = _wing_rounding(boats, legs_by_sail, 0)   # 1st wing rounding (after reach)
-        b2 = _wing_rounding(boats, legs_by_sail, 1)   # 2nd (after the 2nd beat)
-        if a2:
-            marks.append({"label": "2a", "ll": a2})
-        if b2:
-            marks.append({"label": "2b", "ll": b2})
-    else:
-        m2 = detect_wing_mark(boats, legs_by_sail, ux, uy)
-        if m2:
-            marks.append({"label": "2", "ll": m2})
-    for g in detect_gate(boats, legs_by_sail, ux, uy, lx, ly):
-        marks.append({"label": "G", "ll": g})
-    fin = detect_finish(boats, legs_by_sail)
+    for L in order:
+        if gate[L]:
+            src = cand[L]["ext"] if len(cand[L]["ext"]) >= need else cand[L]["apex"]
+            lls = _split_gate(src, need)
+        else:
+            opts = [_med_xy([(la, lo) for la, lo, _ in cand[L][k]], need) for k in ("ext", "apex")]
+            opts = [o for o in opts if o]
+            lls = [min(opts, key=lambda ll: closest_pass(ll, wins[L]))] if opts else []
+        marks += [{"label": L, "ll": ll} for ll in lls]
+    fin = detect_finish(boats, legs_by_sail, need)
     if fin:
-        marks.append({"label": "F", "ll": fin})
+        marks.append({"label": fin_label, "ll": fin})
     return marks
 
 
-def _segment_legs_vmg(b: Boat):
-    """Fallback: split by sign of smoothed windward VMG (upwind/downwind only)."""
-    if b.vmg is None or len(b.vmg) < 20:
+def _segment_legs_vmg(b: Boat, g0=0):
+    """Fallback: split by sign of smoothed windward VMG (upwind/downwind only),
+    from index g0 (the gun) so the pre-start isn't counted as a leg."""
+    if b.vmg is None or len(b.vmg) - g0 < 20:
         return []
     vw = _movavg(b.vmg, 21)
     sign = np.where(vw >= 0, 1, -1)
-    legs, start = [], 0
-    for i in range(1, len(sign)):
+    legs, start = [], g0
+    for i in range(g0 + 1, len(sign)):
         if sign[i] != sign[start] and (b.t[i] - b.t[start]) > 60:
             legs.append((start, i, "upwind" if sign[start] > 0 else "downwind"))
             start = i
