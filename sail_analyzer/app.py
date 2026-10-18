@@ -180,7 +180,9 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
     _lc = {}
     for lg in legs_by_sail.values():
         _lc[len(lg)] = _lc.get(len(lg), 0) + 1
-    mode_legs = max(_lc, key=lambda k: (_lc[k], k)) if _lc else 0   # tie: the longer course
+    # tie: the shorter count (boats often keep tracking after finishing, which the DP
+    # labels as an extra leg; retiring is rarer)
+    mode_legs = max(_lc, key=lambda k: (_lc[k], -k)) if _lc else 0
     finished = {s: bool(lg) and ks is not None and len(lg) >= mode_legs   # fallback split: no course fit
                 for s, (lg, ks) in seg.items()}
     # course leg of each boat leg: a finisher's DP template index; for a retiree (whose
@@ -188,12 +190,6 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
     # split, the n-th leg of a type = the course's n-th leg of that type
     cix_by_sail = {s: (ks if ks is not None and finished[s] else R.course_index(course, lg))
                    for s, (lg, ks) in seg.items()}
-
-    # course marks at the finishers' actual rounding points, labelled as in the course
-    ref = [b for b in boats if finished[b.sail]]
-    if len(ref) < 3:                              # tiny fleet / no course fit: use every boat
-        ref = boats
-    marks = R.detect_marks(ref, wind_from, legs_by_sail, course, cix_by_sail)
 
     # ---- finish times by LINE CROSSING (not leg end, which drifts minutes) ----
     # Finish line: through the fleet-median last-turn apex, perpendicular to the
@@ -223,18 +219,30 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
         lg = legs_by_sail[b.sail]
         if not lg:
             continue
-        a, c, _ = lg[-1]
-        ft = float(b.t[c])
+        ft = float(b.t[lg[-1][1]])                 # no line crossing seen: end of its last leg
+        crossed = False
         if Fx is not None and finished[b.sail]:
-            # search from the start of the leg where the fleet finishes (a boat with
-            # extra legs has post-finish sailing after it) to the END OF TRACK: the
-            # leg-end trim can stop short of the line, biasing that boat late
-            a = lg[mode_legs - 1][0]
+            # search from the start of the leg where the fleet finishes (a boat can have
+            # extra legs) to the END OF TRACK: the leg-end trim can stop short of the line
+            a, c, k = lg[mode_legs - 1]
             proj = (b.x[a:] - Fx) * fux + (b.y[a:] - Fy) * fuy
             hit = np.where(proj >= 0)[0]
             if len(hit):
-                ft = float(b.t[a + int(hit[0])])
+                ft, crossed = float(b.t[a + int(hit[0])]), True
         finish_t[b.sail] = ft
+        # extra legs that start after a seen crossing are post-finish sailing (e.g. back to
+        # harbour): drop them, last leg ends at the line. Without a seen crossing an extra
+        # leg can be real (the fleet's own last legs may be merged), so it is kept.
+        if crossed and len(lg) > mode_legs and ft <= b.t[lg[mode_legs][0]] + 60.0:
+            fi = max(a + 1, min(int(np.searchsorted(b.t, ft)), len(b.t) - 1))
+            legs_by_sail[b.sail] = lg[:mode_legs - 1] + [(a, fi, k)]
+            cix_by_sail[b.sail] = cix_by_sail[b.sail][:mode_legs]
+
+    # course marks at the finishers' actual rounding points, labelled as in the course
+    ref = [b for b in boats if finished[b.sail]]
+    if len(ref) < 3:                              # tiny fleet / no course fit: use every boat
+        ref = boats
+    marks = R.detect_marks(ref, wind_from, legs_by_sail, course, cix_by_sail)
 
     # start line at the gun, with its ends labelled: RC (committee boat, starboard
     # end) and Pin (port end). Starboard = +along-line (wind_from + 90 deg).
