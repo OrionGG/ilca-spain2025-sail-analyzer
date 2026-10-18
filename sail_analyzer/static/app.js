@@ -226,6 +226,11 @@ function renderBG(){
     bgx.strokeStyle='rgba(245,166,35,.75)'; bgx.lineWidth=2*DPR;
     bgx.setLineDash([6*DPR,5*DPR]); bgx.beginPath();
     bgx.moveTo(p1[0],p1[1]); bgx.lineTo(p2[0],p2[1]); bgx.stroke(); bgx.setLineDash([]); }
+  // finish line between its two marks (where the finishers' tracks converge)
+  const cl=courseLegs(), fin=cl.length?markBy(cl[cl.length-1].mark):[];
+  if(fin.length===2){ const p1=proj(fin[0][0],fin[0][1]), p2=proj(fin[1][0],fin[1][1]);
+    bgx.strokeStyle='rgba(120,220,140,.8)'; bgx.lineWidth=2*DPR; bgx.setLineDash([6*DPR,5*DPR]); bgx.beginPath();
+    bgx.moveTo(p1[0],p1[1]); bgx.lineTo(p2[0],p2[1]); bgx.stroke(); bgx.setLineDash([]); }
   // ideal route = fastest demonstrated track per leg (real paths, stitched)
   if(S.showIdeal){ const wps=idealRoute();
     if(wps.length>1){ bgx.strokeStyle='rgba(90,210,255,.9)'; bgx.lineWidth=2.4*DPR; bgx.setLineDash([3*DPR,4*DPR]);
@@ -511,6 +516,16 @@ function buildLegBar(){
     S.legFilter = p.dataset.leg==='all' ? 'all' : +p.dataset.leg; setTab(S.tab); });
 }
 
+// ---------- official results (downloaded per regatta; the reference for finish places) ----------
+// score {pts, code, disc} of a boat (by sail) in a race (by id); low-point: pts = place
+function officialFor(sail, raceId){ const R=S.results; if(!R||sail==null) return null;
+  const d=(String(sail).match(/\d+/)||[''])[0], row=R.rows.find(r=>r.sail===String(sail))||R.rows.find(r=>r.sail===d);
+  const col=raceId==null?-1:R.map.indexOf(raceId); return row&&col>=0?row.scores[col]:null; }
+function curRaceId(){ return S.index&&S.index[S.raceIdx]?S.index[S.raceIdx].id:null; }
+function officialScore(b){ return b?officialFor(b.sail, curRaceId()):null; }
+function officialPlace(b){ const s=officialScore(b); return s&&!s.code&&s.pts!=null?Math.round(s.pts):null; }
+function scoreText(s){ return s?(s.code?s.code:'P'+Math.round(s.pts)):'–'; }
+
 function finishers(){ const f=S.race.boats.filter(b=>b.summary.finished); return f.length?f:S.race.boats; }
 function fleetMedians(){
   const keys=['sog_mean','sog_up','sog_dn','twa_up','twa_dn','vmg_up','vmg_dn','n_tacks','n_gybes','tack_loss','gybe_loss','dist_nm'];
@@ -548,7 +563,10 @@ function keyFindings(body){
   const rank=1+boats.filter(o=>o.summary.race_min<rt).length;     // finish by elapsed gun->finish time
   const B=[];   // bullets
   const close=boats.filter(o=>o.sail!==S.focus && Math.abs(o.summary.race_min-rt)*60<=20).length;
-  if(rt!=null&&medRT!=null) B.push(`Finished ~<b>P${rank}/${n}</b>${nRet?` (of ${nStarted} started; ${nRet} retired)`:''} by elapsed time (${rt} min, fleet median ${medRT.toFixed(1)}; ${fmtS(rt-medRT,1)} min)`+
+  const osc=officialScore(f);
+  if(osc) B.push(`Official result: <b>${scoreText(osc)}</b>${osc.disc?' (discarded)':''}`+
+    (rt!=null&&medRT!=null?` — GPS finish ~P${rank}/${n} by elapsed time (${rt} min, fleet median ${medRT.toFixed(1)}).`:'.'));
+  else if(rt!=null&&medRT!=null) B.push(`Finished ~<b>P${rank}/${n}</b>${nRet?` (of ${nStarted} started; ${nRet} retired)`:''} by elapsed time (${rt} min, fleet median ${medRT.toFixed(1)}; ${fmtS(rt-medRT,1)} min)`+
     (close>0?` — but ${close} boat${close>1?'s are':' is'} within GPS finish error (~20 s), so the exact place is uncertain.`:'.'));
   // per-leg time vs fleet median, leg by leg of the course
   const legT=(o,ci)=>{ const li=ciMap(o)[ci]; if(li==null) return null; const lg=boatLegs(o)[li]; return o.t[lg[1]]-o.t[lg[0]]; };
@@ -573,8 +591,9 @@ function keyFindings(body){
   if(spd<-0.05) weak.push('boatspeed');
   if(s.dist_nm-fm.dist_nm>0.1) weak.push('extra distance');
   let head;
-  if(rank<=n/3) head = spd>=0.03?'Strong — fast and well sailed.':'Good result from tactics/shifts/start, not raw speed.';
-  else if(rank>=2*n/3) head = 'Tough race, near the back'+(weak.length?` — cost mainly by ${weak[0]}.`:'.');
+  const hr=officialPlace(f)??rank;
+  if(hr<=n/3) head = spd>=0.03?'Strong — fast and well sailed.':'Good result from tactics/shifts/start, not raw speed.';
+  else if(hr>=2*n/3) head = 'Tough race, near the back'+(weak.length?` — cost mainly by ${weak[0]}.`:'.');
   else head = spd>0.05?'Mid-fleet; boatspeed ok, places lost on tactics/start.':'Mid-fleet; small margins.';
   // partner line
   let pb='';
@@ -912,7 +931,9 @@ function tabPosition(body){
   const colLabel=i=>legMarkLabel(i)+(i===finCol&&i<courseLegs().length-1?' (finish)':'');
   let mt=`<table><tr><th>Boat</th>${Array.from({length:NL},(_,i)=>`<th>${esc(colLabel(i))}</th>`).join('')}</tr>`;
   const rowFor=(boat,color)=>{ let prev=null, tds='';
-    for(let i=0;i<NL;i++){ const rk2=finishesAt(boat,i)?dbFinishRank(boat,pool):rankAtLeg(boat,i);   // finish line
+    for(let i=0;i<NL;i++){ const sc=isLastFor(boat,i)?officialScore(boat):null;
+      if(sc&&sc.code){ tds+=`<td><span class="bad" title="official result">${esc(sc.code)}</span></td>`; continue; }
+      const rk2=finishesAt(boat,i)?dbFinishRank(boat,pool):rankAtLeg(boat,i);   // finish: official place, else finish line
       const d=(rk2!=null&&prev!=null)?rk2-prev:null; if(rk2!=null)prev=rk2;
       const badge=d==null||d===0?'':` <span class="${d<0?'good':'bad'}" style="font-size:10px">${d<0?'+'+(-d):'−'+d}</span>`;
       tds+=`<td>${rk2==null?'–':'P'+rk2}${badge}</td>`; }
@@ -921,7 +942,8 @@ function tabPosition(body){
   mt+='</table>'; body.insertAdjacentHTML('beforeend',mt);
   body.insertAdjacentHTML('beforeend',`<div class="muted" style="margin-top:4px;font-size:11px">P = place at that mark
    (order the fleet rounded it); green/red = places gained/lost on the leg just sailed. Mark ranks come from rounding
-   times (robust); the Finish column uses the finish-line crossing (±~20 s in packs). Retirees excluded.</div>`);
+   times (robust); the finish column is the official result when downloaded (Regattas…), else the GPS
+   finish-line crossing. Retirees excluded.</div>`);
 
   // gains/losses summary
   const rk=rankOf(f).filter(x=>x[1]!=null);
@@ -953,8 +975,10 @@ function row_eff(rank,x,it){ const lost=x.rt-it; const me=x.sail===S.focus;
 // ---------- Regatta tab: trends across all races ----------
 function tabRegatta(body){
   const idx=S.index||[], p=partnerB(), pn=p?p.name.slice(0,10):null;
-  const rows=idx.map(r=>({x:r.i+1, race:r.race, fl:r.fleet||{}, me:(r.boats||{})[S.focus]||null,
-                          pr:p?((r.boats||{})[S.partner]||null):null}));
+  const withOff=(m,sail,r)=>{ const s=officialFor(sail,r.id); if(!m||!s) return m;
+    return {...m, rank:s.code?null:Math.round(s.pts), n_fin:S.results.rows.length, code:s.code}; };
+  const rows=idx.map(r=>({x:r.i+1, race:r.race, fl:r.fleet||{}, me:withOff((r.boats||{})[S.focus]||null,S.focus,r),
+                          pr:p?withOff((r.boats||{})[S.partner]||null,S.partner,r):null}));
   if(!rows.length || !rows.some(r=>r.me)){ body.insertAdjacentHTML('beforeend','<div class="muted">No regatta summary yet — reopen the regatta (top bar) to analyse its races.</div>'); return; }
   const N=rows.length, fmtX=t=>'R'+Math.round(t);
   const opt={xmin:0.5, xmax:N+0.5, fmtX};
@@ -1008,6 +1032,23 @@ function tabRegatta(body){
     (iss.length?`<div class="muted" style="font-size:13px;line-height:1.6"><ul style="margin:0;padding-left:18px">`+
       iss.map(([w,c])=>`<li><b>${w}</b> — below fleet in ${c}/${N} races</li>`).join('')+'</ul></div>'
     :'<div class="muted">No recurring weakness vs the fleet — gains are race-specific (see per-race table).</div>'));
+  officialTable(body);
+}
+// Official overall results table (downloaded from the regatta's results page)
+function officialTable(body){
+  const R=S.results; if(!R||!R.rows.length) return;
+  const focus=(String(S.focus).match(/\d+/)||[''])[0], part=S.partner?(String(S.partner).match(/\d+/)||[''])[0]:null;
+  let h=`<div class="sectitle">Official results (${R.rows.length} boats${R.fetched?' · downloaded '+esc(R.fetched.slice(0,10)):''})</div>
+    <div style="overflow-x:auto"><table class="offres"><tr><th>#</th><th>Sail</th><th style="text-align:left">Name</th><th>Cat</th><th>Net</th><th>Total</th>`+
+    R.columns.map((c,i)=>`<th title="${esc((S.index.find(x=>x.id===R.map[i])||{}).race||'not a tracked race')}">${esc(c)}</th>`).join('')+'</tr>';
+  for(const r of R.rows){
+    const me=r.sail===focus, pr=part&&r.sail===part;
+    h+=`<tr${me?' style="background:rgba(245,166,35,.18)"':pr?' style="background:rgba(58,160,255,.15)"':''}><td>${r.rank??''}</td><td>${esc(r.sail_raw)}</td>`+
+      `<td style="text-align:left">${esc(r.name)}</td><td>${esc(r.cat||'')}</td><td>${r.net??''}</td><td>${r.total??''}</td>`+
+      r.scores.map(sc=>{ const v=sc.code?`${sc.code}${sc.pts!=null?' '+Math.round(sc.pts):''}`:(sc.pts!=null?Math.round(sc.pts):'');
+        return `<td${sc.code?' class="bad"':''}>${sc.disc?'('+v+')':v}</td>`; }).join('')+'</tr>';
+  }
+  body.insertAdjacentHTML('beforeend',h+'</table></div><div class="muted" style="font-size:11px">( ) = discarded · codes: UFD/BFD = over the line, DNF/RET = did not finish / retired, DNC = did not compete, DSQ = disqualified.</div>');
 }
 
 // ======================= DEBRIEF: course & decision analysis =======================
@@ -1033,12 +1074,14 @@ function dbRoundT(b,ci){ if(ci==null||ci<0) return null; const li=ciMap(b)[ci]; 
   const rr=b._mlegs?null:b.rounds; return rr&&rr[li]!=null?rr[li]:b.t[boatLegs(b)[li][1]]; }
 function isLastFor(b,ci){ const lg=boatLegs(b); return lg.length>0 && courseIdx(b,lg.length-1)===ci; }
 // b crossed the finish line at the end of course leg ci (retirees never "finish")
-function finishesAt(b,ci){ return !!b.summary.finished && isLastFor(b,ci); }
+function finishesAt(b,ci){ return (officialPlace(b)!=null || !!b.summary.finished) && isLastFor(b,ci); }
 function dbRankAtMark(b,i,pl){ const my=dbRoundT(b,i); if(my==null) return null; let r=1;
   for(const o of pl){ if(o===b) continue; const ot=dbRoundT(o,i); if(ot!=null&&ot<my) r++; } return r; }
 function dbRankAtT(b,t,pl){ const k=gk(t), my=boatCourse(b)[k]; if(my==null) return null; let r=1;
   for(const o of pl){ if(o===b) continue; const v=boatCourse(o)[k]; if(v!=null&&v>my) r++; } return r; }
-function dbFinishRank(b,pl){ const rt=b.summary.race_min; if(rt==null||!b.summary.finished) return null; let r=1;
+function dbFinishRank(b,pl){ const op=officialPlace(b); if(op!=null) return op;
+  if(officialScore(b)) return null;                // official code (DNF, UFD, ...): no place
+  const rt=b.summary.race_min; if(rt==null||!b.summary.finished) return null; let r=1;
   for(const o of pl){ if(o!==b&&o.summary.finished&&o.summary.race_min!=null&&o.summary.race_min<rt) r++; } return r; }
 function windVecs(t){ const w=windAtT(t)*Math.PI/180;           // u = upwind, l = right looking upwind
   return {u:[Math.sin(w),Math.cos(w)], l:[Math.cos(w),-Math.sin(w)]}; }
@@ -1296,7 +1339,11 @@ function debriefChecks(b){
   // ---------------- SERIES ----------------
   const series=(S.index||[]).map(x=>({i:x.i, race:x.race, rk:(x.boats||{})[b.sail]?.rank??null, n:(x.boats||{})[b.sail]?.n_fin}));
   const done=series.filter(x=>x.rk!=null);
-  if(done.length>=2){ const worst=done.reduce((p1,c1)=>c1.rk>p1.rk?c1:p1), here=series.find(x=>x.i===S.raceIdx), isD=here&&worst.i===here.i;
+  const offDisc=(S.index||[]).filter(x=>{ const s=officialFor(b.sail,x.id); return s&&s.disc; });
+  if(S.results&&offDisc.length){ const here=offDisc.some(x=>x.i===S.raceIdx);
+    add('Series',here?'warn':'info','Discard (official)',`Discarded in the official results: ${offDisc.map(x=>`${esc(x.race)} (${scoreText(officialFor(b.sail,x.id))})`).join(', ')}. `+
+      (here?'This race is your discard — the next bad one will count, so keep the risk controlled.':'This race counts.')); }
+  else if(done.length>=2){ const worst=done.reduce((p1,c1)=>c1.rk>p1.rk?c1:p1), here=series.find(x=>x.i===S.raceIdx), isD=here&&worst.i===here.i;
     add('Series',isD?'warn':'info','Discard',`Worst race so far (likely discard): ${worst.race} P${worst.rk}/${worst.n}. `+
       (isD?'This race is your discard — the next bad one will count, so keep the risk controlled.':`This race (P${here?.rk??'–'}) counts.`)); }
   return out;
@@ -1375,6 +1422,7 @@ async function loadIndex(rid, raceId){
   const g=S.regattas.find(x=>x.id===rid);
   $('#regTitle').textContent=g?g.name:''; document.title='Sail Analyzer — '+(g?g.name:'');
   S.index=idx;
+  try{ S.results=(await api('/api/results/'+rid)).results; }catch(e){ S.results=null; }
   const rs=$('#raceSel'); rs.innerHTML='';
   S.index.forEach(r=>{ const o=document.createElement('option'); o.value=r.i;
     o.textContent=r.race+'  ·  wind '+r.wind_from+'°'; rs.appendChild(o); });

@@ -65,9 +65,19 @@ sequence; each mark is placed where the fleet actually rounded it (furthest-upwi
 point or turn apex, whichever the tracks pass closest to; gates split into two buoys
 when both were used). See the main README for the step-by-step.
 
+## Finish detection and official results
+The finish is found where the finishers' tracks converge after the last mark (they
+funnel between the committee boat and the pin, then spread out again as they keep
+sailing): the line is placed at the narrowest point and each boat finishes at its first
+crossing. On the Copa 2025 races with complete tracking this reproduces the official
+finish order exactly or within one place. When no such line exists (e.g. tracking
+stopped before the finish) the previous estimate is used. Downloaded official results
+(Regattas… → Official results) are the reference for finish places.
+
 ## Files
 - `app.py` – local HTTP server, regatta registry + upload API, cache builder (stdlib only).
-- `regatta.py` – the analytics engine (parsing, wind, VMG, maneuvers, legs, marks, start).
+- `regatta.py` – the analytics engine (parsing, wind, VMG, maneuvers, legs, marks, start, finish).
+- `results.py` – official-results download + parser (Sailti / HTML results tables).
 - `static/` – the offline single-page UI (no CDN); `manage.js` = Regattas manager.
 - `cache/` – generated per-race JSON (rebuilt automatically when stale).
 - `data/`, `regattas.json` – your uploaded tracks and regatta list (local, gitignored).
