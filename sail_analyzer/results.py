@@ -16,12 +16,14 @@ Parsed form:
 from __future__ import annotations
 
 import html as html_lib
+import http.client
 import re
 import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 
 MAX_BYTES = 10 * 1024 * 1024
+_FETCH_ERRORS = (OSError, http.client.HTTPException, ValueError)   # network, bad URL, too large
 UA = "Mozilla/5.0 (Sail Analyzer; official results import)"
 
 
@@ -223,7 +225,7 @@ def fetch_results(url: str):
         raise ValueError("Give the http(s) link of the results page.")
     try:
         page = _fetch(url)
-    except OSError as e:
+    except _FETCH_ERRORS as e:
         raise ValueError(f"Could not download the results page ({e}).")
     res, problem = None, None
     m = re.search(r"""['"]([^'"]*resultsajax\?[^'"]*allResults=1[^'"]*)['"]""", page) or \
@@ -236,7 +238,7 @@ def fetch_results(url: str):
         else:
             try:
                 res = parse_results(_fetch(sub))
-            except OSError as e:
+            except _FETCH_ERRORS as e:
                 problem = f"Could not download the results table ({e})."
     res = res or parse_results(page)                # else a plain table on the page itself
     if not res:

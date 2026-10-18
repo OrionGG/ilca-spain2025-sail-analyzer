@@ -600,7 +600,7 @@ function keyFindings(body){
   if(spd<-0.05) weak.push('boatspeed');
   if(s.dist_nm-fm.dist_nm>0.1) weak.push('extra distance');
   let head;
-  const op=officialPlace(f), offN=S.results?S.results.rows.filter(r=>{ const sc=officialFor(r.sail,curRaceId()); return sc&&!sc.code; }).length:0;
+  const op=officialPlace(f), offN=S.results?S.results.rows.filter(r=>{ const sc=officialFor(r.sail,curRaceId()); return sc&&!noFinish(sc); }).length:0;
   const hr=op??rank, hn=op!=null?offN:n;
   if(noFinish(osc)) head = `Scored ${osc.code} in the official results`+(weak.length?` — GPS also points to ${weak[0]}.`:'.');
   else if(hr<=hn/3) head = spd>=0.03?'Strong — fast and well sailed.':'Good result from tactics/shifts/start, not raw speed.';
@@ -993,7 +993,7 @@ function tabRegatta(body){
   const idx=S.index||[], p=partnerB(), pn=p?p.name.slice(0,10):null;
   const withOff=(m,sail,r)=>{ const s=officialFor(sail,r.id); if(!m||!s) return m;
     const scored=S.results.rows.filter(x=>{ const v=officialFor(x.sail,r.id); return v&&!noFinish(v); }).length;
-    return {...m, rank:noFinish(s)?null:(officialPlaceBySail(sail,r.id)??m.rank), n_fin:scored, code:s.code}; };
+    return {...m, rank:noFinish(s)?null:(officialPlaceBySail(sail,r.id)??(s.pts!=null?Math.round(s.pts):m.rank)), n_fin:scored, code:s.code}; };
   const rows=idx.map(r=>({x:r.i+1, race:r.race, fl:r.fleet||{}, me:withOff((r.boats||{})[S.focus]||null,S.focus,r),
                           pr:p?withOff((r.boats||{})[S.partner]||null,S.partner,r):null}));
   if(!rows.length || !rows.some(r=>r.me)){ body.insertAdjacentHTML('beforeend','<div class="muted">No regatta summary yet — reopen the regatta (top bar) to analyse its races.</div>'); return; }
@@ -1032,7 +1032,7 @@ function tabRegatta(body){
     let pv='';
     if(p){ const d=(m.race_min!=null&&r.pr&&r.pr.race_min!=null)?Math.round((m.race_min-r.pr.race_min)*60):null;
       pv=d==null?'<td>–</td>':`<td><b class="${d<=0?'good':'bad'}">${d<=0?'':'+'}${d}s</b></td>`; }
-    h+=`<tr><td>${esc(r.race)}</td><td>${m.rank?`P${m.rank}/${m.n_fin}`:`<span class="bad">${esc(m.code||'DNF')}</span>`}</td>`+
+    h+=`<tr><td>${esc(r.race)}</td><td>${m.rank?`P${m.rank}/${m.n_fin}${m.code?` <span class="muted">${esc(m.code)}</span>`:''}`:`<span class="bad">${esc(m.code||'DNF')}</span>`}</td>`+
        cell(dlt(r,'sog_up',m))+cell(dlt(r,'sog_dn',m))+cell(dlt(r,'twa_up',m),true)+
        cell(dlt(r,'tack_loss',m),true)+cell(dlt(r,'dist_nm',m),true)+pv+'</tr>'; }
   h+='</table>'; body.insertAdjacentHTML('beforeend',h);
