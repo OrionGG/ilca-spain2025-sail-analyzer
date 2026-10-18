@@ -341,23 +341,18 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
             # post-finish sailing, i.e. clearly later
             dt = [t - finish_t[s] for s, t in (conv or {}).get("times", {}).items() if s in finish_t]
             if conv and dt and float(np.median(dt)) <= 60.0:
-                finish_t.update(conv["times"])
-                gps_finish = set(conv["times"])
                 for b in boats:
-                    if b.sail not in gps_finish:
+                    lg, ft = legs_by_sail[b.sail], conv["times"].get(b.sail)
+                    # only a boat that sailed the final leg finishes by crossing (a retiree
+                    # sailing home through the finish area doesn't)
+                    if ft is None or not lg or not cix_by_sail[b.sail] or cix_by_sail[b.sail][-1] != fin_ci:
                         continue
-                    lg, ft = legs_by_sail[b.sail], conv["times"][b.sail]
-                    if not lg:
-                        continue
-                    a, c, k = lg[-1]                  # the last leg (and race window) ends at the line
-                    idx = max(a + 1, min(int(np.searchsorted(b.t, ft)), len(b.t) - 1))
-                    on_final = bool(cix_by_sail[b.sail]) and cix_by_sail[b.sail][-1] == fin_ci
-                    if on_final:
-                        finished[b.sail] = True       # sailed the final leg and crossed the line
-                    if on_final or idx < c:
-                        legs_by_sail[b.sail] = lg[:-1] + [(a, idx, k)]
-                    if on_final:
-                        rounds_by_sail[b.sail][-1] = ft
+                    a, _c, k = lg[-1]                 # the last leg (and race window) ends at the line
+                    legs_by_sail[b.sail] = lg[:-1] + [(a, max(a + 1, min(int(np.searchsorted(b.t, ft)), len(b.t) - 1)), k)]
+                    rounds_by_sail[b.sail][-1] = ft
+                    finish_t[b.sail] = ft
+                    finished[b.sail] = True
+                    gps_finish.add(b.sail)
                 fl = course[-1]["mark"]
                 to_ll = lambda px, py: [lat0 + py / 111320.0, lon0 + px / (111320.0 * cosLat)]
                 marks = [m for m in marks if m["label"] != fl] + [{"label": fl, "ll": to_ll(*e)} for e in conv["ends"]]

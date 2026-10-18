@@ -519,8 +519,9 @@ function buildLegBar(){
 // ---------- official results (downloaded per regatta; the reference for finish places) ----------
 // score {pts, code, disc} of a boat (by sail) in a race (by id); low-point: pts = place
 function officialFor(sail, raceId){ const R=S.results; if(!R||sail==null) return null;
-  const d=(String(sail).match(/\d+/)||[''])[0], row=R.rows.find(r=>r.sail===String(sail))||R.rows.find(r=>r.sail===d);
+  const d=sailDigits(sail), row=R.rows.find(r=>r.sail===String(sail))||R.rows.find(r=>r.sail===d);
   const col=raceId==null?-1:R.map.indexOf(raceId); return row&&col>=0?row.scores[col]:null; }
+function sailDigits(s){ return (String(s).match(/\d+/g)||['']).reduce((a,b)=>b.length>a.length?b:a,''); }
 function curRaceId(){ return S.index&&S.index[S.raceIdx]?S.index[S.raceIdx].id:null; }
 function officialScore(b){ return b?officialFor(b.sail, curRaceId()):null; }
 // codes for boats that did not finish / were removed; other codes (ZFP, SCP, DPI, RDG...) finished
@@ -938,7 +939,7 @@ function tabPosition(body){
   let mt=`<table><tr><th>Boat</th>${Array.from({length:NL},(_,i)=>`<th>${esc(colLabel(i))}</th>`).join('')}</tr>`;
   const rowFor=(boat,color)=>{ let prev=null, tds='';
     for(let i=0;i<NL;i++){ const sc=isLastFor(boat,i)?officialScore(boat):null;
-      if(sc&&sc.code){ tds+=`<td><span class="bad" title="official result">${esc(sc.code)}</span></td>`; continue; }
+      if(noFinish(sc)){ tds+=`<td><span class="bad" title="official result">${esc(sc.code)}</span></td>`; continue; }
       const rk2=finishesAt(boat,i)?dbFinishRank(boat,pool):rankAtLeg(boat,i);   // finish: official place, else finish line
       const d=(rk2!=null&&prev!=null)?rk2-prev:null; if(rk2!=null)prev=rk2;
       const badge=d==null||d===0?'':` <span class="${d<0?'good':'bad'}" style="font-size:10px">${d<0?'+'+(-d):'−'+d}</span>`;
@@ -1043,7 +1044,7 @@ function tabRegatta(body){
 // Official overall results table (downloaded from the regatta's results page)
 function officialTable(body){
   const R=S.results; if(!R||!R.rows.length) return;
-  const focus=(String(S.focus).match(/\d+/)||[''])[0], part=S.partner?(String(S.partner).match(/\d+/)||[''])[0]:null;
+  const focus=sailDigits(S.focus), part=S.partner?sailDigits(S.partner):null;
   let h=`<div class="sectitle">Official results (${R.rows.length} boats${R.fetched?' · downloaded '+esc(R.fetched.slice(0,10)):''})</div>
     <div style="overflow-x:auto"><table class="offres"><tr><th>#</th><th>Sail</th><th style="text-align:left">Name</th><th>Cat</th><th>Net</th><th>Total</th>`+
     R.columns.map((c,i)=>`<th title="${esc((S.index.find(x=>x.id===R.map[i])||{}).race||'not a tracked race')}">${esc(c)}</th>`).join('')+'</tr>';

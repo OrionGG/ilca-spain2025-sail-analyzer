@@ -15,6 +15,7 @@ Parsed form:
 
 from __future__ import annotations
 
+import html as html_lib
 import re
 import urllib.parse
 import urllib.request
@@ -66,12 +67,26 @@ class _Tables(HTMLParser):
         elif not self._stack:
             return
         elif tag == "tr":
+            self._flush_cell()
+            self._flush_row()
             self._row = []
         elif tag in ("td", "th") and self._row is not None:
+            self._flush_cell()
             self._cell = []
             self._in_head = tag == "th"
         elif tag == "br" and self._cell is not None:
             self._cell.append(" ")
+
+    def _flush_cell(self):
+        if self._cell is not None and self._row is not None:
+            self._row.append((re.sub(r"\s+", " ", "".join(self._cell)).strip(), self._in_head))
+        self._cell = None
+
+    def _flush_row(self):
+        if self._row and self._stack:
+            t = self._stack[-1]
+            (t["head"] if all(h for _, h in self._row) else t["rows"]).append([c for c, _ in self._row])
+        self._row = None
 
     def handle_endtag(self, tag):
         if any(t == tag for t, _h in self._open):     # pop back to the matching open tag
@@ -79,14 +94,11 @@ class _Tables(HTMLParser):
                 pass
         if not self._stack:
             return
-        if tag in ("td", "th") and self._cell is not None and self._row is not None:
-            self._row.append((re.sub(r"\s+", " ", "".join(self._cell)).strip(), self._in_head))
-            self._cell = None
+        if tag in ("td", "th"):
+            self._flush_cell()
         elif tag in ("tr", "thead", "tbody", "table"):     # a row may be left unclosed
-            if self._row:
-                t = self._stack[-1]
-                (t["head"] if all(h for _, h in self._row) else t["rows"]).append([c for c, _ in self._row])
-            self._row = None
+            self._flush_cell()
+            self._flush_row()
             if tag == "table":
                 self.tables.append(self._stack.pop())
 
@@ -96,8 +108,6 @@ class _Tables(HTMLParser):
 
 
 def _split_rows(html: str):
-    """Sailti opens a <tr> without closing the previous one; normalise that first."""
-    html = re.sub(r"(</td>)\s*<tr", r"\1</tr><tr", html, flags=re.I)
     p = _Tables()
     p.feed(html)
     p.close()
@@ -147,18 +157,16 @@ def _parse_table(t):
     for r in rows:
         if len(r) <= max(i for i, _ in races):
             continue
-        sail_raw = r[col["sail"]]
-        digits = re.sub(r"\D", "", sail_raw)
+        cell = lambda k: r[col[k]] if k in col and col[k] < len(r) else ""
+        sail_raw = cell("sail")
+        digits = max(re.findall(r"\d+", sail_raw), key=len, default="")
         if not digits:
             continue
         out.append({
             "rank": int(_num(r[0])) if _num(r[0]) is not None else None,
             "sail": digits, "sail_raw": sail_raw,
-            "name": r[col["name"]] if "name" in col else "",
-            "club": r[col["club"]] if "club" in col else "",
-            "cat": r[col["cat"]] if "cat" in col else "",
-            "net": _num(r[col["net"]]) if "net" in col else None,
-            "total": _num(r[col["total"]]) if "total" in col else None,
+            "name": cell("name"), "club": cell("club"), "cat": cell("cat"),
+            "net": _num(cell("net")), "total": _num(cell("total")),
             "scores": [_score(r[i]) for i, _ in races],
         })
     return {"races": [n for _, n in races], "rows": out} if out else None
@@ -184,7 +192,7 @@ def fetch_results(url: str):
         m = re.search(r"""['"]([^'"]*resultsajax\?[^'"]*allResults=1[^'"]*)['"]""", html) or \
             re.search(r"""['"]([^'"]*resultsajax\?[^'"]+)['"]""", html)
         if m:                                      # Sailti: the table comes from this request
-            sub = urllib.parse.urljoin(url, m.group(1))
+            sub = urllib.parse.urljoin(url, html_lib.unescape(m.group(1)))
             su = urllib.parse.urlparse(sub)
             if su.scheme not in ("http", "https") or su.netloc != u.netloc:
                 raise ValueError("The results page points to another site; give the results table's own link.")
