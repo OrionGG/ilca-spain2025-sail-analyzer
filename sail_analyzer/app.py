@@ -186,6 +186,7 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
     # too, use it: one leg apart is a merged leg or post-finish sailing, not a retirement.
     common = sorted((c for c in _lc if c > 0 and _lc[c] >= 0.25 * sum(_lc.values())), reverse=True)
     mode_legs = common[0] if common else max((c for c in _lc if c > 0), key=_lc.get, default=0)
+    line_legs = mode_legs                         # finish line from boats that sailed the most legs
     if mode_legs - 1 in common:
         mode_legs -= 1
     finished = {s: bool(lg) and ks is not None and len(lg) >= mode_legs   # fallback split: no course fit
@@ -204,7 +205,7 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
     apexes, fdirs = [], []
     for b in boats:
         lg = legs_by_sail[b.sail]
-        if not finished[b.sail] or len(lg) != mode_legs:
+        if not finished[b.sail] or len(lg) != line_legs:
             continue
         a, c, _ = lg[-1]
         j = R._refine_turn(b, c)                    # sharpest turn ~ the line
@@ -235,13 +236,27 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
             if len(hit):
                 ft, crossed = float(b.t[a + int(hit[0])]), True
         finish_t[b.sail] = ft
-        # extra legs that start after a seen crossing are post-finish sailing (e.g. back to
-        # harbour): drop them, last leg ends at the line. Without a seen crossing an extra
-        # leg can be real (the fleet's own last legs may be merged), so it is kept.
-        if crossed and len(lg) > mode_legs and ft <= b.t[lg[mode_legs][0]] + 60.0:
-            fi = max(a + 1, min(int(np.searchsorted(b.t, ft)), len(b.t) - 1))
-            legs_by_sail[b.sail] = lg[:mode_legs - 1] + [(a, fi, k)]
+        # a finisher's legs beyond the fleet's count (a final leg the fleet's own fits
+        # merged, or post-finish sailing) merge into the fleet's last leg, which ends at the
+        # line when the crossing is seen, so every finisher's legs compare like for like
+        if finished[b.sail] and len(lg) > mode_legs:
+            a, c, k = lg[mode_legs - 1]
+            end = int(np.searchsorted(b.t, ft)) if crossed else lg[-1][1]
+            legs_by_sail[b.sail] = lg[:mode_legs - 1] + [(a, max(a + 1, min(end, len(b.t) - 1)), k)]
             cix_by_sail[b.sail] = cix_by_sail[b.sail][:mode_legs]
+    # ...and every finisher's last leg is the fleet's final course leg (the fit can label the
+    # same physical final leg with different template legs, e.g. in a shortened race)
+    lasts = [cix_by_sail[s][-1] for s in legs_by_sail if finished[s] and cix_by_sail[s]]
+    fin_ci = max(set(lasts), key=lasts.count) if lasts else None
+    kind_of = {"U": "upwind", "R": "reach", "D": "downwind"}
+    for s in legs_by_sail:
+        cx = cix_by_sail[s]
+        if fin_ci is None or not finished[s] or not cx or cx[-1] == fin_ci:
+            continue
+        if len(cx) < 2 or (cx[-2] is not None and cx[-2] < fin_ci):
+            a, c, _ = legs_by_sail[s][-1]
+            legs_by_sail[s] = legs_by_sail[s][:-1] + [(a, c, kind_of[course[fin_ci]["type"]])]
+            cix_by_sail[s] = cx[:-1] + [fin_ci]
 
     # course marks at the finishers' actual rounding points, labelled as in the course
     ref = [b for b in boats if finished[b.sail]]

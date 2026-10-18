@@ -579,9 +579,17 @@ def _block_splits(b, wind_from, typ, a, c, cnt, w=4, edge_s=60.0, min_turn=45.0)
     if typ in ("U", "D") and cnt == 2:
         wf = math.radians(wind_from)
         p = b.x[lo:hi] * math.sin(wf) + b.y[lo:hi] * math.cos(wf)
-        return [lo + int(np.argmax(p) if typ == "U" else np.argmin(p))]
+        j = int(np.argmax(p) if typ == "U" else np.argmin(p))
+        return [lo + j] if 3 <= j < len(p) - 3 else []   # extreme at a block end: one leg only
+    # persistent heading change: mean heading over 10-30 s after vs before, so a penalty
+    # spin (which ends on its old heading) doesn't count as a mark rounding
+    rad = np.radians(b.cog)
+    cs = np.concatenate([[0.0], np.cumsum(np.cos(rad))]); sn = np.concatenate([[0.0], np.cumsum(np.sin(rad))])
     idx = np.arange(lo, hi)
-    turn = np.abs(wrap180(b.cog[idx + w] - b.cog[idx - w]))
+    def mean_head(i0, i1):
+        i0 = np.clip(i0, 0, len(rad)); i1 = np.clip(i1, 0, len(rad))
+        return np.degrees(np.arctan2(sn[i1] - sn[i0], cs[i1] - cs[i0]))
+    turn = np.abs(wrap180(mean_head(idx + 3, idx + 10) - mean_head(idx - 10, idx - 3)))
     cuts = []
     for o in np.argsort(-turn):
         if turn[o] < min_turn:
