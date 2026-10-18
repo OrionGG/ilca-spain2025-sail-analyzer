@@ -1203,10 +1203,18 @@ function debriefChecks(b){
         (ret?`You turned back at ${mmss(ret)} (looks like a return). `:'No return detected — check the results for OCS. ')+
         'Know the flag first: under U or black flag there is no return (UFD/BFD) — sail on and reset for the next race.', gun, 5);
     } else {
-      const behind=-ahead;
-      add(P, behind<=15?'good':'warn','Line position at the gun',
-        behind<=15?`Front row at the gun (${Math.max(0,behind).toFixed(0)} m behind the fleet front).`
-                  :`${behind.toFixed(0)} m behind the front row at the gun — second-row start, in the first row's dirty air.`, gun, behind>15?2:0);
+      // ILCA: on the line at the gun at full speed (~1 length back at 5 s, then accelerate). Upwind a
+      // Laser covers ~½ length (2 m) per second: <= 2 m is on the line, from ~1½ lengths (6 m) the
+      // boat is in the second row, in the front row's dirty air.
+      const behind=Math.round(Math.max(0,-ahead)), bl=(behind/4.2).toFixed(1);   // judged as shown (whole m)
+      const v=behind<=2?'good':behind<6?'warn':'bad';
+      add(P, v, 'Line position at the gun',
+        v==='good'?`On the line at the gun (${behind} m behind the fleet front).`
+        :v==='warn'?`${behind} m (~${bl} boat lengths) behind the front row at the gun — a second or two late. `+
+                    'Be about a length back with 5 s to go and hit the line at full speed with the gun.'
+        :`${behind} m (~${bl} boat lengths) behind the front row at the gun — a second-row start, in the front `+
+         'row\'s dirty air. Hold your spot closer to the line (half a length from the boats either side) and pull the trigger earlier.',
+        gun, v==='bad'?2:v==='warn'?1:0);
     }
   }
   // speed / footing in the first 90 s
