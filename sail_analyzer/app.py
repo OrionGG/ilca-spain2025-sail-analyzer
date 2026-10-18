@@ -321,7 +321,8 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
 
     # ---- finish line where the finishers' tracks converge (between the committee boat
     # and the pin; they spread out again as they keep sailing). Boats crossing it get that
-    # finish time; without such a line (e.g. tracking stopped first) the estimate stays.
+    # finish time (a finisher passing outside its ends: the line extended); without such a
+    # line (e.g. tracking stopped first) the estimate stays.
     gps_finish = set()
     pci = (len(course) - 2 if fin_ci >= len(course) - 2 else fin_ci - 1) if fin_ci is not None else None
     if pci is not None and pci >= 0 and _mk.get(course[pci]["mark"]):
@@ -344,6 +345,8 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
             if conv and dt and float(np.median(dt)) <= 60.0:
                 for b in boats:
                     lg, ft = legs_by_sail[b.sail], conv["times"].get(b.sail)
+                    if ft is None and finished[b.sail]:
+                        ft = conv["any"].get(b.sail)
                     # only a boat that sailed the final leg finishes by crossing (a retiree
                     # sailing home through the finish area doesn't)
                     if ft is None or not lg or not cix_by_sail[b.sail] or cix_by_sail[b.sail][-1] != fin_ci:
@@ -1022,14 +1025,13 @@ class Handler(BaseHTTPRequestHandler):
         if parts[3:] == ["results"]:                                      # download official results
             url = str(body.get("url", "")).strip()
             res = RS.fetch_results(url)                   # network: outside any lock
-            _write_json(results_path(rid), {"races": res["races"], "rows": res["rows"]})
-            races = find_regatta(load_registry(), rid)["races"]
-            default_map = [races[i]["id"] if i < len(races) else None for i in range(len(res["races"]))]
 
-            def save(reg):
+            def save(reg):                                # the file and its registry entry together
                 g = find_regatta(reg, rid)
                 if g is None:
                     raise ValueError("unknown regatta")
+                _write_json(results_path(rid), {"races": res["races"], "rows": res["rows"]})
+                default_map = [g["races"][i]["id"] if i < len(g["races"]) else None for i in range(len(res["races"]))]
                 old = g.get("results") or {}
                 by_name = dict(zip(old.get("columns") or [], old.get("map") or []))
                 mp = [by_name[c] if c in by_name else None for c in res["races"]]
@@ -1059,9 +1061,9 @@ class Handler(BaseHTTPRequestHandler):
                 g = find_regatta(reg, rid)
                 if g is not None:
                     g.pop("results", None)
+                if os.path.exists(results_path(rid)):
+                    os.remove(results_path(rid))
             edit_registry(drop)
-            if os.path.exists(results_path(rid)):
-                os.remove(results_path(rid))
             return self._json({"ok": True})
         if parts[3:] == ["rename"]:
             name = clean_text(body.get("name"), 80)

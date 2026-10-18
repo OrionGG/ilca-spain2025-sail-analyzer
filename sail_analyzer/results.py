@@ -186,8 +186,9 @@ def _parse_table(t):
         digits = max(re.findall(r"\d+", sail_raw), key=len, default="")
         if not digits:
             continue
+        rank = _num(r[0]) if 0 not in col.values() and races[0][0] != 0 else None
         out.append({
-            "rank": int(_num(r[0])) if _num(r[0]) is not None else None,
+            "rank": int(rank) if rank is not None else None,
             "sail": digits, "sail_raw": sail_raw,
             "name": cell("name"), "club": cell("club"), "cat": cell("cat"),
             "net": _num(cell("net")), "total": _num(cell("total")),

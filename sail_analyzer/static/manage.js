@@ -208,7 +208,10 @@ function wireResultsBox(g){
 }
 async function reloadResults(rid){
   if(S.regatta !== rid) return;
-  try{ S.results = (await api('/api/results/'+rid)).results; }catch(e){ S.results = null; }
+  const tok = S._ixTok;
+  let res = null; try{ res = (await api('/api/results/'+rid)).results; }catch(e){}
+  if(S.regatta !== rid || tok !== S._ixTok) return;     // another regatta (or a reload) took over
+  S.results = res;
   if(S.race) setTab(S.tab);
 }
 

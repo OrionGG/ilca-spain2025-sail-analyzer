@@ -632,8 +632,10 @@ def finish_by_convergence(boats, starts, origin, target, ref, step=5.0, max_spre
     (10-90% width <= max_spread m and <= funnel x the median width along the scan — a
     funnel, not a single-file stretch — reached by >= min_reach of the finishers),
     spanning the 5-95% offsets. A boat finishes at its first crossing of that segment (+- margin).
-    Returns None (no convergence, e.g. tracking stopped first) or
-    {"ends": [(x, y), (x, y)], "times": {sail: t}}.
+    The finishers must slow right after it (they stop racing; a funnel mid-leg is followed by
+    racing speed). Returns None (no convergence, e.g. tracking stopped first) or
+    {"ends": [(x, y), (x, y)], "times": {sail: t}, "any": {sail: t}} — "any": first passage
+    of the line's distance at any lateral offset (the line extended).
     """
     o = np.asarray(origin, float)
     D = float(np.hypot(*(np.asarray(target, float) - o)))
@@ -676,15 +678,29 @@ def finish_by_convergence(boats, starts, origin, target, ref, step=5.0, max_spre
     if after and max(after) < 1.5 * max(best[1], 5.0):
         return None
     s, _w, lo, hi = best
-    times = {}
+    times, anyx = {}, {}
     for sail, (t, a, c) in tracks.items():
         for j in np.where((a[:-1] < s) & (a[1:] >= s))[0]:
             f = (s - a[j]) / (a[j + 1] - a[j])
+            tj = float(t[j] + f * (t[j + 1] - t[j]))
+            anyx.setdefault(sail, tj)
             if lo - margin <= c[j] + f * (c[j + 1] - c[j]) <= hi + margin:
-                times[sail] = float(t[j] + f * (t[j + 1] - t[j]))
+                times[sail] = tj
                 break
+    # finishers slow from racing speed within a few minutes of the line (checked when most are
+    # still tracked a while after it)
+    slow = []
+    for b in boats:
+        ft = times.get(b.sail)
+        if ft is None or b.sail not in ref or b.sog is None:
+            continue
+        m1, m2 = (b.t >= ft - 60) & (b.t < ft), (b.t >= ft + 60) & (b.t < ft + 180)
+        if m1.sum() > 2 and m2.sum() > 2:
+            slow.append(float(np.median(b.sog[m2])) / max(float(np.median(b.sog[m1])), 0.1))
+    if len(slow) >= max(3, 0.5 * len(times)) and float(np.median(slow)) > 0.7:
+        return None
     ends = [tuple(o + s * u + w * nrm) for w in (lo - 10.0, hi + 10.0)]
-    return {"ends": ends, "times": times}
+    return {"ends": ends, "times": times, "any": anyx}
 
 
 def _med_xy(pts, need=3):

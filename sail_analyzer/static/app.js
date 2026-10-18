@@ -529,7 +529,7 @@ function sailDigits(s){ return (String(s).match(/\d+/g)||['']).reduce((a,b)=>b.l
 function curRaceId(){ return S.index&&S.index[S.raceIdx]?S.index[S.raceIdx].id:null; }
 function officialScore(b){ return b?officialFor(b.sail, curRaceId()):null; }
 // codes for boats that did not finish / were removed; other codes (ZFP, SCP, DPI, RDG...) finished
-const NO_FINISH=new Set(['DNC','DNS','OCS','UFD','BFD','DNF','RET','DSQ','DNE','DGM','NSC','RAF']);
+const NO_FINISH=new Set(['DNC','DNS','OCS','UFD','BFD','DNF','RET','DSQ','DNE','DGM','NSC','RAF','TLE']);
 const noFinish=s=>!!(s&&s.code&&NO_FINISH.has(s.code));
 function officialPlace(b){ const s=officialScore(b); return s&&!s.code&&s.pts!=null?Math.round(s.pts):null; }
 function officialPlaceBySail(sail, raceId){ const s=officialFor(sail, raceId); return s&&!s.code&&s.pts!=null?Math.round(s.pts):null; }
@@ -947,8 +947,12 @@ function tabPosition(body){
       const fin=finishesAt(boat,i), rk2=fin?dbFinishRank(boat,pool):rankAtLeg(boat,i);   // finish: official order, else finish line
       const d=(rk2!=null&&prev!=null)?rk2-prev:null; if(rk2!=null)prev=rk2;
       const badge=d==null||d===0?'':` <span class="${d<0?'good':'bad'}" style="font-size:10px">${d<0?'+'+(-d):'−'+d}</span>`;
-      const shown=fin&&officialPlace(boat)!=null?officialPlace(boat):rk2;          // the official place itself
-      tds+=`<td${fin&&officialPlace(boat)!=null?' title="official result"':''}>${shown==null?'–':'P'+shown}${badge}</td>`; }
+      const op=fin?officialPlace(boat):null, shown=op!=null?op:rk2;               // the official place itself
+      // boats ahead not tracked (or not matched): the official place isn't on the mark ranks'
+      // scale, so the rank among the tracked boats and its gain/loss go alongside
+      const tip=op==null?'':op===rk2?' title="official result"':` title="official result; P${rk2} among the tracked boats"`;
+      const extra=op==null||op===rk2?badge:` <span class="muted" style="font-size:10px">(P${rk2} tracked${badge})</span>`;
+      tds+=`<td${tip}>${shown==null?'–':'P'+shown}${extra}</td>`; }
     return `<tr><td style="color:${color}">${boat.name.slice(0,12)}</td>${tds}</tr>`; };
   mt+=rowFor(f,'var(--focus)'); if(p) mt+=rowFor(p,'var(--partner)');
   mt+='</table>'; body.insertAdjacentHTML('beforeend',mt);
@@ -1436,14 +1440,13 @@ async function loadIndex(rid, raceId){
     setBusy('Could not load that regatta: '+e.message); setTimeout(()=>setBusy(null),5000);
     $('#regSel').value=S.regatta||''; return; }
   if(tok!==S._ixTok) return;
+  let res=null; try{ res=(await api('/api/results/'+rid)).results; }catch(e){}
+  if(tok!==S._ixTok) return;                       // a newer regatta selection took over
   setBusy(null);
   S.regatta=rid; $('#regSel').value=rid; try{ localStorage.setItem('sa_regatta',rid); }catch(e){}
   const g=S.regattas.find(x=>x.id===rid);
   $('#regTitle').textContent=g?g.name:''; document.title='Sail Analyzer — '+(g?g.name:'');
-  S.index=idx;
-  let res=null; try{ res=(await api('/api/results/'+rid)).results; }catch(e){}
-  if(tok!==S._ixTok) return;                       // a newer regatta selection took over
-  S.results=res;
+  S.index=idx; S.results=res;
   const rs=$('#raceSel'); rs.innerHTML='';
   S.index.forEach(r=>{ const o=document.createElement('option'); o.value=r.i;
     o.textContent=r.race+'  ·  wind '+r.wind_from+'°'; rs.appendChild(o); });
