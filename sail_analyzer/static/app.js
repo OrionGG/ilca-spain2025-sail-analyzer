@@ -1204,13 +1204,13 @@ function debriefChecks(b){
         'Know the flag first: under U or black flag there is no return (UFD/BFD) — sail on and reset for the next race.', gun, 5);
     } else {
       // ILCA: on the line at the gun at full speed (~1 length back at 5 s, then accelerate). Measured
-      // behind the fleet's front row; upwind a Laser covers ~½ length (2 m) per second: <= 2 m is in
-      // the front row, from ~1½ lengths (6 m, ~3 s late) the boat starts in the second row, and from
-      // ~3½ lengths (15 m) it wasn't in the line at the gun at all.
+      // behind the fleet's front row (along the wind): <= 2 m (½ length) is the front row, from ~1½
+      // lengths (6 m, ~3-5 s late at the fleet's upwind VMG off the line) the boat starts in the
+      // second row, and from ~3½ lengths (15 m) it wasn't in the line at the gun at all.
       const behind=Math.round(Math.max(0,-ahead));             // judged as shown (whole m)
       const v=behind<=2?'good':behind<6?'warn':'bad';
-      const vOff=medN(pl.map(o=>trackMean(o,gun,gun+30,i=>o.sog[i])));         // fleet speed off the line, kt
-      const late=Math.round(behind/(Math.max(vOff||3.9,1)*0.5144));
+      const vmgOff=medN(pl.map(o=>trackMean(o,gun,gun+30,i=>o.vmg[i])));      // fleet VMG off the line, kt
+      const late=Math.round(behind/(Math.max(vmgOff||2.6,0.5)*0.5144));
       const gap=`${behind} m (~${(behind/4.2).toFixed(1)} boat lengths, ~${late} s late) behind the front row at the gun`;
       add(P, v, 'Line position at the gun',
         v==='good'?`On the line at the gun (${behind} m behind the fleet front).`
