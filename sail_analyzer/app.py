@@ -808,9 +808,11 @@ def registry_view():
     for rg in reg["regattas"]:
         races = []
         for r in rg["races"]:
+            meta = _read_json(_meta_path(rg["id"], r["id"])) or {}
             races.append({"id": r["id"], "name": r["name"], "course": r["course"], "gun": r.get("gun"),
                           "n_files": len(kml_files(r)), "uploaded": is_upload_dir(race_dir_abs(r)),
-                          "analysed": os.path.exists(race_cache_path(rg["id"], r["id"]))})
+                          "analysed": os.path.exists(race_cache_path(rg["id"], r["id"])),
+                          "error": meta.get("error")})
         out.append({"id": rg["id"], "name": rg["name"], "races": races})
     return {"regattas": out, "templates": [{**t, "course": parse_legs(t["legs"])} for t in TEMPLATES]}
 

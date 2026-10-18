@@ -28,9 +28,9 @@ function renderManager(msg){
   if(g){
     h += `<table class="mgt"><tr><th>Race</th><th style="text-align:left">Course</th><th>Gun (UTC)</th><th>Tracks</th><th></th></tr>`;
     g.races.forEach(r=>{
-      h += `<tr><td>${esc(r.name)}</td><td style="text-align:left;font-size:11.5px">${courseText(r.course)}</td>
+      h += `<tr><td>${esc(r.name)}${r.error?`<div class="bad" style="font-size:11px;max-width:260px">${esc(r.error)}</div>`:''}</td><td style="text-align:left;font-size:11.5px">${courseText(r.course)}</td>
         <td>${r.gun?esc(r.gun):'<span class="muted">auto</span>'}</td>
-        <td>${r.n_files}${r.analysed?'':' <span class="bad" title="not analysed yet">!</span>'}</td>
+        <td>${r.n_files}${r.analysed?'':` <span class="bad" title="${esc(r.error||'not analysed yet')}">!</span>`}</td>
         <td style="white-space:nowrap"><button class="btn" data-edit="${r.id}">Edit</button><button class="btn danger" data-del="${r.id}">✕</button></td></tr>`;
     });
     if(!g.races.length) h += `<tr><td colspan=5 class="muted" style="text-align:left">No races yet.</td></tr>`;

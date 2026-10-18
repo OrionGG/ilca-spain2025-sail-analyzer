@@ -460,7 +460,7 @@ def detect_gun(boats, wind_from):
     and surges upwind together. We find that onset from the fleet-median upwind
     VMG and snap to the nearest round clock-minute (starts are set on the minute).
     """
-    t0 = min(b.t[0] for b in boats)
+    t0 = float(np.median([b.t[0] for b in boats]))   # one early tracker can't shift the window
     grid = np.arange(t0, t0 + 900, 5.0)              # first 15 min
     V = [np.interp(grid, b.t, b.vmg, left=np.nan, right=np.nan)
          for b in boats if b.vmg is not None]
@@ -487,7 +487,16 @@ def segment_legs(b: Boat, wind_from, template=("U", "R", "D", "U", "D", "R"), gu
     """
     if b.vmg is None or len(b.t) < 30:
         return ([], []) if with_index else []
-    tmpl = [_MODE[c] for c in template]
+    # consecutive legs of the same type (e.g. the two reaches of a triangle) can't be
+    # told apart by sailing mode: fit them as one block, then split the block at its
+    # sharpest turns (the marks between them)
+    groups = []                                      # [type, first template index, count]
+    for k, c in enumerate(template):
+        if groups and groups[-1][0] == c:
+            groups[-1][2] += 1
+        else:
+            groups.append([c, k, 1])
+    tmpl = [_MODE[gr[0]] for gr in groups]
     K = len(tmpl)
     n = len(b.t)
     mode = _mode_array(b)
@@ -520,11 +529,16 @@ def segment_legs(b: Boat, wind_from, template=("U", "R", "D", "U", "D", "R"), gu
         bounds[k] = back[k][bounds[k + 1]]
 
     legs, ks = [], []
-    for k in range(K):
-        a, c = bounds[k], bounds[k + 1]
-        if c - a >= 2:
-            legs.append((a, min(c, n - 1), _KIND[tmpl[k]]))
-            ks.append(k)
+    for gi in range(K):
+        a, c = bounds[gi], min(bounds[gi + 1], n - 1)
+        if c - a < 2:
+            continue
+        _typ, k0, cnt = groups[gi]
+        edges = [a] + _turn_splits(b, a, c, cnt) + [c]
+        for j in range(len(edges) - 1):
+            if edges[j + 1] - edges[j] >= 2:
+                legs.append((edges[j], edges[j + 1], _KIND[tmpl[gi]]))
+                ks.append(k0 + j)
 
     # Trim the final leg at peak progress along its own axis: after the finish a
     # boat turns back (to shore / milling), so projection onto the leg direction
@@ -544,6 +558,22 @@ def segment_legs(b: Boat, wind_from, template=("U", "R", "D", "U", "D", "R"), gu
     if len(legs) < 2:
         legs, ks = _segment_legs_vmg(b, g0), None
     return (legs, ks) if with_index else legs
+
+
+def _turn_splits(b, a, c, cnt, w=4):
+    """cnt-1 split indices inside [a, c] at the sharpest heading changes, >= 60 s apart."""
+    if cnt <= 1 or c - a < 2 * w + 2:
+        return []
+    idx = np.arange(a + w, c - w)
+    turn = np.abs(wrap180(b.cog[idx + w] - b.cog[idx - w]))
+    cuts = []
+    for o in np.argsort(-turn):
+        i = int(idx[o])
+        if all(abs(b.t[i] - b.t[x]) >= 60 for x in cuts):
+            cuts.append(i)
+            if len(cuts) == cnt - 1:
+                break
+    return sorted(cuts)
 
 
 def course_index(course, legs):
