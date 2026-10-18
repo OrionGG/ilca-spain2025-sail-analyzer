@@ -180,7 +180,7 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
     _lc = {}
     for lg in legs_by_sail.values():
         _lc[len(lg)] = _lc.get(len(lg), 0) + 1
-    mode_legs = max(_lc, key=_lc.get) if _lc else 0
+    mode_legs = max(_lc, key=lambda k: (_lc[k], k)) if _lc else 0   # tie: the longer course
     finished = {s: bool(lg) and ks is not None and len(lg) >= mode_legs   # fallback split: no course fit
                 for s, (lg, ks) in seg.items()}
     # course leg of each boat leg: a finisher's DP template index; for a retiree (whose
@@ -617,7 +617,10 @@ def _write_json(path, obj, compact=False):
 
 
 def store_race_cache(rid, race, data, cfg):
-    """cfg = race_cfg_hash of the tracks as they were when the analysis read them."""
+    """cfg = race_cfg_hash of the tracks as they were when the analysis read them.
+    The old meta goes first: data without a matching meta is stale, never "fresh"."""
+    if os.path.exists(_meta_path(rid, race["id"])):
+        os.remove(_meta_path(rid, race["id"]))
     _write_json(race_cache_path(rid, race["id"]), data, compact=True)
     _write_json(_meta_path(rid, race["id"]), {"cfg": cfg, "name": race["name"],
                                               "key": race.get("key"),
