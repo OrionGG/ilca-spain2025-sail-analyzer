@@ -178,12 +178,13 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
     # a boat "finished" if it sailed the full course (>= the fleet's modal leg count).
     # Boats with fewer legs are retirees/DNF and are excluded from fleet metrics.
     _lc = {}
-    for lg in legs_by_sail.values():
-        _lc[len(lg)] = _lc.get(len(lg), 0) + 1
+    for lg, ks in seg.values():
+        if ks is not None:                        # fallback up/down splits say nothing about the course
+            _lc[len(lg)] = _lc.get(len(lg), 0) + 1
     # The course length the fleet sailed: the largest leg count held by >= 25% of the
     # boats (so retirees can't outvote finishers); if the count one below is that common
     # too, use it: one leg apart is a merged leg or post-finish sailing, not a retirement.
-    common = sorted((c for c in _lc if c > 0 and _lc[c] >= 0.25 * len(legs_by_sail)), reverse=True)
+    common = sorted((c for c in _lc if c > 0 and _lc[c] >= 0.25 * sum(_lc.values())), reverse=True)
     mode_legs = common[0] if common else max((c for c in _lc if c > 0), key=_lc.get, default=0)
     if mode_legs - 1 in common:
         mode_legs -= 1

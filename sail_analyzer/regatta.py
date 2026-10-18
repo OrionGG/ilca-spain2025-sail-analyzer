@@ -460,7 +460,9 @@ def detect_gun(boats, wind_from):
     and surges upwind together. We find that onset from the fleet-median upwind
     VMG and snap to the nearest round clock-minute (starts are set on the minute).
     """
-    t0 = float(np.median([b.t[0] for b in boats]))   # one early tracker can't shift the window
+    # window from the 25th percentile of track starts: a few trackers switched on early
+    # can't shift it, nor can some switched on after the gun
+    t0 = float(np.percentile([b.t[0] for b in boats], 25))
     grid = np.arange(t0, t0 + 900, 5.0)              # first 15 min
     V = [np.interp(grid, b.t, b.vmg, left=np.nan, right=np.nan)
          for b in boats if b.vmg is not None]
@@ -533,8 +535,8 @@ def segment_legs(b: Boat, wind_from, template=("U", "R", "D", "U", "D", "R"), gu
         a, c = bounds[gi], min(bounds[gi + 1], n - 1)
         if c - a < 2:
             continue
-        _typ, k0, cnt = groups[gi]
-        edges = [a] + _turn_splits(b, a, c, cnt) + [c]
+        typ, k0, cnt = groups[gi]
+        edges = [a] + _block_splits(b, wind_from, typ, a, c, cnt) + [c]
         for j in range(len(edges) - 1):
             if edges[j + 1] - edges[j] >= 2:
                 legs.append((edges[j], edges[j + 1], _KIND[tmpl[gi]]))
@@ -560,14 +562,30 @@ def segment_legs(b: Boat, wind_from, template=("U", "R", "D", "U", "D", "R"), gu
     return (legs, ks) if with_index else legs
 
 
-def _turn_splits(b, a, c, cnt, w=4):
-    """cnt-1 split indices inside [a, c] at the sharpest heading changes, >= 60 s apart."""
-    if cnt <= 1 or c - a < 2 * w + 2:
+def _block_splits(b, wind_from, typ, a, c, cnt, w=4, edge_s=60.0, min_turn=45.0):
+    """Split indices for a block of cnt consecutive same-type legs over [a, c].
+
+    Candidates stay >= edge_s from the block ends (the fitted boundaries lag the real
+    roundings, whose turns would otherwise win). Two beats split at the furthest-upwind
+    point and two runs at the furthest-downwind point (a tack/gybe turns more than the
+    mark between them); otherwise at the sharpest turns of >= min_turn degrees, >= 60 s
+    apart. Fewer cuts are returned when the block doesn't show them (shortened race)."""
+    if cnt <= 1:
         return []
-    idx = np.arange(a + w, c - w)
+    lo = int(np.searchsorted(b.t, b.t[a] + edge_s)); hi = int(np.searchsorted(b.t, b.t[c] - edge_s))
+    lo, hi = max(lo, a + w), min(hi, c - w)
+    if hi - lo < 2:
+        return []
+    if typ in ("U", "D") and cnt == 2:
+        wf = math.radians(wind_from)
+        p = b.x[lo:hi] * math.sin(wf) + b.y[lo:hi] * math.cos(wf)
+        return [lo + int(np.argmax(p) if typ == "U" else np.argmin(p))]
+    idx = np.arange(lo, hi)
     turn = np.abs(wrap180(b.cog[idx + w] - b.cog[idx - w]))
     cuts = []
     for o in np.argsort(-turn):
+        if turn[o] < min_turn:
+            break
         i = int(idx[o])
         if all(abs(b.t[i] - b.t[x]) >= 60 for x in cuts):
             cuts.append(i)
