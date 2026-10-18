@@ -712,18 +712,22 @@ def store_race_cache(rid, race, data, cfg):
                                               "entry": index_entry(0, race["id"], data)})
 
 
+def remove_file(path):
+    for attempt in range(20):                     # Windows: a reader may hold the file open
+        try:
+            os.remove(path)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise
+            threading.Event().wait(0.05)
+
+
 def drop_race_cache(rid, race_id):
     for f in (race_cache_path(rid, race_id), _meta_path(rid, race_id)):
-        for attempt in range(20):                 # Windows: a reader may hold the file open
-            try:
-                os.remove(f)
-                break
-            except FileNotFoundError:
-                break
-            except PermissionError:
-                if attempt == 19:
-                    raise
-                threading.Event().wait(0.05)
+        remove_file(f)
 
 
 class AnalysisError(ValueError):
@@ -939,10 +943,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(idx) if idx is not None else self._err("unknown regatta", 404)
         m = re.fullmatch(r"/api/results/([a-z0-9-]+)", path)
         if m:
-            rg = find_regatta(load_registry(), m.group(1))
+            with REG_RMW:                                 # written together (download / delete)
+                rg = find_regatta(load_registry(), m.group(1))
+                data = _read_json(results_path(rg["id"])) if rg and rg.get("results") else None
             if rg is None:
                 return self._err("unknown regatta", 404)
-            data = _read_json(results_path(rg["id"])) if rg.get("results") else None
             return self._json({"ok": True, "results": {**rg["results"], **data} if data else None})
         m = re.fullmatch(r"/api/race/([a-z0-9-]+)/([a-z0-9-]+)", path)
         if m:
@@ -1064,8 +1069,7 @@ class Handler(BaseHTTPRequestHandler):
                 g = find_regatta(reg, rid)
                 if g is not None:
                     g.pop("results", None)
-                if os.path.exists(results_path(rid)):
-                    os.remove(results_path(rid))
+                remove_file(results_path(rid))
             edit_registry(drop)
             return self._json({"ok": True})
         if parts[3:] == ["rename"]:

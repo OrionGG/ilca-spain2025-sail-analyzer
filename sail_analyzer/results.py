@@ -44,8 +44,7 @@ _VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "me
          "source", "track", "wbr"}
 _SECT = ("table", "thead", "tbody", "tfoot")
 _CLOSE_TO = {"td": ("tr",) + _SECT, "th": ("tr",) + _SECT, "tr": _SECT,          # a start tag closes
-             "thead": ("table",), "tbody": ("table",), "tfoot": ("table",),       # open tags up to these
-             "table": ("td", "th", "tr") + _SECT}
+             "thead": ("table",), "tbody": ("table",), "tfoot": ("table",)}       # open tags up to these
 
 
 class _Tables(HTMLParser):
@@ -132,7 +131,7 @@ def _split_rows(html: str):
 
 _HEAD = {
     "sail": re.compile(r"^((nat\.?|nation)\s*)?(vela|sail)(\s*(no\.?|nr\.?|number|num\.?|#))?$|^n[º°o]?\.?\s*(de\s*)?vela$|^bow(\s*(no\.?|#))?$", re.I),
-    "name": re.compile(r"^(tripulantes?|name|helm|skipper|crew|regatista|sailor)s?$", re.I),
+    "name": re.compile(r"^(tripulantes?|name|helm|skipper|crew|regatista|sailor|nombre|patr[oó]n|timonel|deportista)s?$", re.I),
     "club": re.compile(r"^(club)$", re.I),
     "cat": re.compile(r"^(cat|category|categor[ií]a|div)$", re.I),
     "net": re.compile(r"^(net|nett|neto)( ?(points|pts|puntos))?$", re.I),

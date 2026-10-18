@@ -1103,12 +1103,16 @@ function dbRankAtT(b,t,pl){ const k=gk(t), my=boatCourse(b)[k]; if(my==null) ret
 function dbFinishRank(b,pl){                     // within the same pool as the mark ranks
   if(noFinish(officialScore(b))) return null;      // official DNF/UFD/DSQ...: no place
   const gps=o=>o.summary.finished&&o.summary.race_min!=null?o.summary.race_min:null;
-  const op=officialPlace(b), rt=gps(b); if(op==null&&rt==null) return null; let r=1;
-  for(const o of pl){ if(o===b||noFinish(officialScore(o))) continue;
-    // both placed officially: that order; else (ZFP etc., unmatched sail) the GPS finish order
-    const p=officialPlace(o), ot=gps(o);
-    if(op!=null&&p!=null ? p<op : rt!=null&&ot!=null&&ot<rt) r++; }
-  return r; }
+  // official order, with the boats that have no official place (ZFP etc., unmatched sail)
+  // merged in by GPS finish time — one order, so no two boats share a place
+  const ok=pl.includes(b)?pl:pl.concat([b]), rest=ok.filter(o=>!noFinish(officialScore(o)));
+  const off=rest.filter(o=>officialPlace(o)!=null).sort((x,y)=>officialPlace(x)-officialPlace(y));
+  const oth=rest.filter(o=>officialPlace(o)==null&&gps(o)!=null).sort((x,y)=>gps(x)-gps(y));
+  const order=[]; let i=0, j=0;
+  while(i<off.length||j<oth.length){
+    const a=off[i], c=oth[j];
+    if(c&&(!a||(gps(a)!=null&&gps(c)<gps(a)))){ order.push(c); j++; } else { order.push(a); i++; } }
+  const k=order.indexOf(b); return k<0?null:k+1; }
 function windVecs(t){ const w=windAtT(t)*Math.PI/180;           // u = upwind, l = right looking upwind
   return {u:[Math.sin(w),Math.cos(w)], l:[Math.cos(w),-Math.sin(w)]}; }
 function countIn(arr,t0,t1,kind){ return (arr||[]).filter(m=>m.t>=t0&&m.t<=t1&&(!kind||m.kind===kind)).length; }
@@ -1374,7 +1378,7 @@ function debriefChecks(b){
   else if(offSer.length>=2){ const worst=offSer.reduce((p1,c1)=>pts(c1.s)>pts(p1.s)?c1:p1), here=offSer.find(x=>x.i===S.raceIdx), isD=here&&worst.i===here.i;
     add('Series',isD?'warn':'info','Discard (official)',`Worst official score so far (likely discard): ${esc(worst.race)} ${scoreText(worst.s)}. `+
       (isD?'This race is your discard — the next bad one will count, so keep the risk controlled.':`This race (${here?scoreText(here.s):'–'}) counts.`)); }
-  else if(!offSer.length&&done.length>=2){ const worst=done.reduce((p1,c1)=>c1.rk>p1.rk?c1:p1), here=series.find(x=>x.i===S.raceIdx), isD=here&&worst.i===here.i;
+  else if(offSer.length<2&&done.length>=2){ const worst=done.reduce((p1,c1)=>c1.rk>p1.rk?c1:p1), here=series.find(x=>x.i===S.raceIdx), isD=here&&worst.i===here.i;
     add('Series',isD?'warn':'info','Discard',`Worst race so far (likely discard): ${worst.race} P${worst.rk}/${worst.n}. `+
       (isD?'This race is your discard — the next bad one will count, so keep the risk controlled.':`This race (P${here?.rk??'–'}) counts.`)); }
   return out;
