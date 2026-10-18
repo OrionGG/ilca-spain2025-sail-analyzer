@@ -1111,10 +1111,12 @@ function dbFinishRank(b,pl){                     // within the same pool as the 
   const ok=pl.includes(b)?pl:pl.concat([b]), rest=ok.filter(o=>!noFinish(officialScore(o)));
   const off=rest.filter(o=>officialPlace(o)!=null).sort((x,y)=>officialPlace(x)-officialPlace(y));
   const oth=rest.filter(o=>officialPlace(o)==null&&gps(o)!=null).sort((x,y)=>gps(x)-gps(y));
-  const order=[]; let i=0, j=0;
-  while(i<off.length||j<oth.length){
-    const a=off[i], c=oth[j];
-    if(c&&(!a||(gps(a)!=null&&gps(c)<gps(a)))){ order.push(c); j++; } else { order.push(a); i++; } }
+  const order=[]; let i=0;
+  for(const c of oth){                               // before the first placed boat that GPS has behind it
+    let j=i; while(j<off.length&&!(gps(off[j])!=null&&gps(off[j])>gps(c))) j++;
+    while(i<j) order.push(off[i++]);
+    order.push(c); }
+  while(i<off.length) order.push(off[i++]);
   const k=order.indexOf(b); return k<0?null:k+1; }
 function windVecs(t){ const w=windAtT(t)*Math.PI/180;           // u = upwind, l = right looking upwind
   return {u:[Math.sin(w),Math.cos(w)], l:[Math.cos(w),-Math.sin(w)]}; }

@@ -27,17 +27,19 @@ _FETCH_ERRORS = (OSError, http.client.HTTPException, ValueError)   # network, ba
 UA = "Mozilla/5.0 (Sail Analyzer; official results import)"
 
 
-def _fetch(url: str) -> str:
+def _fetch(url: str):
+    """(text, final URL after redirects)."""
     req = urllib.request.Request(url, headers={"User-Agent": UA, "X-Requested-With": "XMLHttpRequest"})
     with urllib.request.urlopen(req, timeout=25) as r:
         raw = r.read(MAX_BYTES + 1)
         charset = r.headers.get_content_charset() or "utf-8"
+        final = r.geturl() or url
     if len(raw) > MAX_BYTES:
         raise ValueError("The results page is too large.")
     try:
-        return raw.decode(charset)
+        return raw.decode(charset), final
     except (UnicodeDecodeError, LookupError):
-        return raw.decode("cp1252", errors="replace")
+        return raw.decode("cp1252", errors="replace"), final
 
 
 _VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
@@ -223,20 +225,20 @@ def fetch_results(url: str):
     if u.scheme not in ("http", "https") or not u.netloc:
         raise ValueError("Give the http(s) link of the results page.")
     try:
-        page = _fetch(url)
+        page, final = _fetch(url)
     except _FETCH_ERRORS as e:
         raise ValueError(f"Could not download the results page ({e}).")
     res, problem = None, None
     m = re.search(r"""['"]([^'"]*resultsajax\?[^'"]*allResults=1[^'"]*)['"]""", page) or \
         re.search(r"""['"]([^'"]*resultsajax\?[^'"]+)['"]""", page)
     if m:                                          # Sailti: the table comes from this request
-        sub = urllib.parse.urljoin(url, html_lib.unescape(m.group(1)))
+        sub = urllib.parse.urljoin(final, html_lib.unescape(m.group(1)))
         su = urllib.parse.urlparse(sub)
-        if su.scheme not in ("http", "https") or su.netloc != u.netloc:
+        if su.scheme not in ("http", "https") or su.netloc != urllib.parse.urlparse(final).netloc:
             problem = "The results page points to another site; give the results table's own link."
         else:
             try:
-                res = parse_results(_fetch(sub))
+                res = parse_results(_fetch(sub)[0])
             except _FETCH_ERRORS as e:
                 problem = f"Could not download the results table ({e})."
     res = res or parse_results(page)                # else a plain table on the page itself
