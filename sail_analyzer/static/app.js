@@ -523,7 +523,22 @@ function buildLegBar(){
 // ---------- official results (downloaded per regatta; the reference for finish places) ----------
 // score {pts, code, disc} of a boat (by sail) in a race (by id); low-point: pts = place
 function officialRow(sail){ const R=S.results; if(!R||sail==null) return null;
-  const d=sailDigits(sail); return R.rows.find(r=>r.sail===String(sail))||R.rows.find(r=>r.sail===d)||null; }
+  if(R._ix!==S.index) linkResults();
+  return R._link.get(String(sail))||R._bySail.get(String(sail))||R._bySail.get(sailDigits(sail))||null; }
+// Tracked boats -> official rows, built once per results/index: by sail number, else by name when
+// the numbers differ (a typo on either side): every word of the tracker's name starts a word of
+// exactly one unclaimed row's name, and no other unmatched boat matches that row.
+function nameWords(s){ return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase()
+  .split(/[^A-Z]+/).filter(w=>w.length>=3); }
+function linkResults(){ const R=S.results, bySail=new Map(), link=new Map(), byName=new Map(), used=new Set();
+  for(const r of R.rows) if(!bySail.has(r.sail)) bySail.set(r.sail,r);
+  const tracked=new Map(); for(const x of S.index||[]) for(const [sail,m] of Object.entries(x.boats||{})) if(!tracked.get(sail)) tracked.set(sail,(m&&m.name)||'');
+  const left=[];
+  for(const [sail,name] of tracked){ const r=bySail.get(sail)||bySail.get(sailDigits(sail));
+    if(r){ link.set(sail,r); used.add(r); } else left.push([sail,nameWords(name)]); }
+  const cands=left.map(([sail,tk])=>[sail, tk.length?R.rows.filter(r=>!used.has(r)&&(ws=>tk.every(t=>ws.some(w=>w.startsWith(t))))(nameWords(r.name))):[]]);
+  for(const [sail,c] of cands) if(c.length===1&&cands.filter(([,c2])=>c2.includes(c[0])).length===1){ link.set(sail,c[0]); byName.set(c[0],sail); }
+  R._bySail=bySail; R._link=link; R._byName=byName; R._ix=S.index; }
 function officialFor(sail, raceId){ const R=S.results, row=officialRow(sail);
   const col=!row||raceId==null?-1:R.map.indexOf(raceId); return row&&col>=0?row.scores[col]:null; }
 function sailDigits(s){ return (String(s).match(/\d+/g)||['']).reduce((a,b)=>b.length>a.length?b:a,''); }
@@ -1057,13 +1072,15 @@ function tabRegatta(body){
 // Official overall results table (downloaded from the regatta's results page)
 function officialTable(body){
   const R=S.results; if(!R||!R.rows.length) return;
-  const focus=sailDigits(S.focus), part=S.partner?sailDigits(S.partner):null;
+  if(R._ix!==S.index) linkResults();
+  const focus=officialRow(S.focus), part=S.partner?officialRow(S.partner):null;
   let h=`<div class="sectitle">Official results (${R.rows.length} boats${R.fetched?' · downloaded '+esc(R.fetched.slice(0,10)):''})</div>
     <div style="overflow-x:auto"><table class="offres"><tr><th>#</th><th>Sail</th><th style="text-align:left">Name</th><th>Cat</th><th>Net</th><th>Total</th>`+
     R.columns.map((c,i)=>`<th title="${esc((S.index.find(x=>x.id===R.map[i])||{}).race||'not a tracked race')}">${esc(c)}</th>`).join('')+'</tr>';
   for(const r of R.rows){
-    const me=r.sail===focus, pr=part&&r.sail===part;
-    h+=`<tr${me?' style="background:rgba(245,166,35,.18)"':pr?' style="background:rgba(58,160,255,.15)"':''}><td>${r.rank??''}</td><td>${esc(r.sail_raw)}</td>`+
+    const me=r===focus, pr=part&&r===part, nm=R._byName.get(r);
+    h+=`<tr${me?' style="background:rgba(245,166,35,.18)"':pr?' style="background:rgba(58,160,255,.15)"':''}><td>${r.rank??''}</td><td>${esc(r.sail_raw)}`+
+      `${nm?` <span class="muted" title="tracked as sail ${esc(nm)}: matched by name">≈${esc(nm)}</span>`:''}</td>`+
       `<td style="text-align:left">${esc(r.name)}</td><td>${esc(r.cat||'')}</td><td>${r.net??''}</td><td>${r.total??''}</td>`+
       r.scores.map(sc=>{ if(!sc) return '<td></td>'; const v=sc.code?`${sc.code}${sc.pts!=null?' '+Math.round(sc.pts):''}`:(sc.pts!=null?Math.round(sc.pts):'');
         return `<td${sc.code?' class="bad"':''}>${sc.disc?'('+v+')':v}</td>`; }).join('')+'</tr>';
