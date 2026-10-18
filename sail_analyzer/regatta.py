@@ -634,8 +634,9 @@ def finish_by_convergence(boats, starts, origin, target, ref, step=5.0, max_spre
     spanning the 5-95% offsets. A boat finishes at its first crossing of that segment (+- margin).
     The finishers must slow right after it (they stop racing; a funnel mid-leg is followed by
     racing speed). Returns None (no convergence, e.g. tracking stopped first) or
-    {"ends": [(x, y), (x, y)], "times": {sail: t}, "any": {sail: t}} — "any": first passage
-    of the line's distance at any lateral offset (the line extended).
+    {"ends": [(x, y), (x, y)], "times": {sail: t}, "near": {sail: t}} — "near": for a boat
+    with no crossing of the segment, its crossing of the line extended nearest the ends
+    (<= 200 m out).
     """
     o = np.asarray(origin, float)
     D = float(np.hypot(*(np.asarray(target, float) - o)))
@@ -678,15 +679,20 @@ def finish_by_convergence(boats, starts, origin, target, ref, step=5.0, max_spre
     if after and max(after) < 1.5 * max(best[1], 5.0):
         return None
     s, _w, lo, hi = best
-    times, anyx = {}, {}
+    times, near = {}, {}
     for sail, (t, a, c) in tracks.items():
+        best_out = None
         for j in np.where((a[:-1] < s) & (a[1:] >= s))[0]:
             f = (s - a[j]) / (a[j + 1] - a[j])
-            tj = float(t[j] + f * (t[j + 1] - t[j]))
-            anyx.setdefault(sail, tj)
-            if lo - margin <= c[j] + f * (c[j + 1] - c[j]) <= hi + margin:
+            tj, cj = float(t[j] + f * (t[j + 1] - t[j])), float(c[j] + f * (c[j + 1] - c[j]))
+            if lo - margin <= cj <= hi + margin:
                 times[sail] = tj
                 break
+            out = lo - cj if cj < lo else cj - hi       # how far outside the line's ends
+            if out <= 200.0 and (best_out is None or out < best_out[0]):
+                best_out = (out, tj)
+        if sail not in times and best_out:
+            near[sail] = best_out[1]
     # finishers slow from racing speed within a few minutes of the line (checked when most are
     # still tracked a while after it)
     slow = []
@@ -700,7 +706,7 @@ def finish_by_convergence(boats, starts, origin, target, ref, step=5.0, max_spre
     if len(slow) >= max(3, 0.5 * len(times)) and float(np.median(slow)) > 0.7:
         return None
     ends = [tuple(o + s * u + w * nrm) for w in (lo - 10.0, hi + 10.0)]
-    return {"ends": ends, "times": times, "any": anyx}
+    return {"ends": ends, "times": times, "near": near}
 
 
 def _med_xy(pts, need=3):

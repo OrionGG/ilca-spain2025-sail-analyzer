@@ -40,6 +40,10 @@ def _fetch(url: str) -> str:
 
 _VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
          "source", "track", "wbr"}
+_SECT = ("table", "thead", "tbody", "tfoot")
+_CLOSE_TO = {"td": ("tr",) + _SECT, "th": ("tr",) + _SECT, "tr": _SECT,          # a start tag closes
+             "thead": ("table",), "tbody": ("table",), "tfoot": ("table",),       # open tags up to these
+             "table": ("td", "th", "tr") + _SECT}
 
 
 class _Tables(HTMLParser):
@@ -58,8 +62,9 @@ class _Tables(HTMLParser):
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
         hidden = "display:none" in (a.get("style") or "").replace(" ", "").lower()
-        if tag in ("td", "th", "tr", "table"):          # cells/rows never inherit a stray hidden state
-            while self._open and self._open[-1][0] not in ("td", "th", "tr", "table", "thead", "tbody"):
+        stop = _CLOSE_TO.get(tag)
+        if stop:                                       # cells/rows never inherit a stray hidden state
+            while self._open and self._open[-1][0] not in stop:   # (an unclosed cell/row ends here)
                 self._open.pop()
         if tag not in _VOID:
             self._open.append((tag, hidden or self._is_hidden()))
@@ -156,7 +161,11 @@ def _columns(head):
                 col[k] = i
         m = _RACE.match(h.strip())
         if m:
-            races.append((i, re.sub(r"\s+", "", h.strip()).upper() if m.group(1) else m.group(2)))
+            base = re.sub(r"\s+", "", h.strip()).upper() if m.group(1) else m.group(2)
+            name, k = base, 2
+            while name in {n for _, n in races}:      # grouped headers repeat 1, 2, ...: keep labels unique
+                name, k = f"{base} ({k})", k + 1
+            races.append((i, name))
     return col, races
 
 
@@ -213,18 +222,23 @@ def fetch_results(url: str):
     if u.scheme not in ("http", "https") or not u.netloc:
         raise ValueError("Give the http(s) link of the results page.")
     try:
-        html = _fetch(url)
-        m = re.search(r"""['"]([^'"]*resultsajax\?[^'"]*allResults=1[^'"]*)['"]""", html) or \
-            re.search(r"""['"]([^'"]*resultsajax\?[^'"]+)['"]""", html)
-        if m:                                      # Sailti: the table comes from this request
-            sub = urllib.parse.urljoin(url, html_lib.unescape(m.group(1)))
-            su = urllib.parse.urlparse(sub)
-            if su.scheme not in ("http", "https") or su.netloc != u.netloc:
-                raise ValueError("The results page points to another site; give the results table's own link.")
-            html = _fetch(sub)
+        page = _fetch(url)
     except OSError as e:
         raise ValueError(f"Could not download the results page ({e}).")
-    res = parse_results(html)
+    res, problem = None, None
+    m = re.search(r"""['"]([^'"]*resultsajax\?[^'"]*allResults=1[^'"]*)['"]""", page) or \
+        re.search(r"""['"]([^'"]*resultsajax\?[^'"]+)['"]""", page)
+    if m:                                          # Sailti: the table comes from this request
+        sub = urllib.parse.urljoin(url, html_lib.unescape(m.group(1)))
+        su = urllib.parse.urlparse(sub)
+        if su.scheme not in ("http", "https") or su.netloc != u.netloc:
+            problem = "The results page points to another site; give the results table's own link."
+        else:
+            try:
+                res = parse_results(_fetch(sub))
+            except OSError as e:
+                problem = f"Could not download the results table ({e})."
+    res = res or parse_results(page)                # else a plain table on the page itself
     if not res:
-        raise ValueError("No results table found on that page (expected sail numbers and race columns).")
+        raise ValueError(problem or "No results table found on that page (expected sail numbers and race columns).")
     return res

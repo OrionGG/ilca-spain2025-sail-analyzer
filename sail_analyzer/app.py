@@ -321,7 +321,7 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
 
     # ---- finish line where the finishers' tracks converge (between the committee boat
     # and the pin; they spread out again as they keep sailing). Boats crossing it get that
-    # finish time (a finisher passing outside its ends: the line extended); without such a
+    # finish time (a finisher passing just outside its ends: the line extended); without such a
     # line (e.g. tracking stopped first) the estimate stays.
     gps_finish = set()
     pci = (len(course) - 2 if fin_ci >= len(course) - 2 else fin_ci - 1) if fin_ci is not None else None
@@ -331,6 +331,9 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
             li = next((i for i, c in enumerate(cix_by_sail[b.sail]) if c == pci), None)
             if li is not None and rounds_by_sail[b.sail][li] is not None:
                 starts[b.sail] = rounds_by_sail[b.sail][li]
+            elif finished[b.sail] and legs_by_sail[b.sail] and cix_by_sail[b.sail] \
+                    and cix_by_sail[b.sail][-1] == fin_ci:      # no rounding pass seen: its final leg's start
+                starts[b.sail] = float(b.t[legs_by_sail[b.sail][-1][0]])
         fins = [b for b in boats if finished[b.sail]]
         if fins:
             target = np.median([(b.x[legs_by_sail[b.sail][-1][1]], b.y[legs_by_sail[b.sail][-1][1]])
@@ -346,7 +349,7 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
                 for b in boats:
                     lg, ft = legs_by_sail[b.sail], conv["times"].get(b.sail)
                     if ft is None and finished[b.sail]:
-                        ft = conv["any"].get(b.sail)
+                        ft = conv["near"].get(b.sail)
                     # only a boat that sailed the final leg finishes by crossing (a retiree
                     # sailing home through the finish area doesn't)
                     if ft is None or not lg or not cix_by_sail[b.sail] or cix_by_sail[b.sail][-1] != fin_ci:
