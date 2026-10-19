@@ -14,7 +14,7 @@ import urllib.error
 import urllib.request
 
 from tests import support
-import app as A
+from sail_analyzer import app as A
 
 RACE1 = os.path.join(support.ROOT, "01_Prueba 1")
 

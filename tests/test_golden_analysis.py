@@ -26,7 +26,7 @@ try:
     from tests import support
 except ImportError:          # run as a script: python tests/test_golden_analysis.py --update
     import support
-import app as A
+from sail_analyzer import app as A
 
 DIR = os.path.join(support.GOLDEN, "analysis")
 

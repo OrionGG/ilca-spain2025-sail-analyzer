@@ -618,7 +618,9 @@ def normalize_gun(gun):
 # Cache: cache/<regatta>/<race>.json (+ .meta.json), cache/<regatta>/index.json
 # --------------------------------------------------------------------------- #
 # caches older than the code this process runs are rebuilt
-SRC_MTIME = max(os.path.getmtime(f) for f in glob.glob(os.path.join(HERE, "**", "*.py"), recursive=True))
+ANALYSIS_SOURCES = ([os.path.join(HERE, f) for f in ("app.py", "regatta.py")]   # the code a cached race comes from
+                    + glob.glob(os.path.join(glob.escape(HERE), "entities", "*.py")))
+SRC_MTIME = max(os.path.getmtime(f) for f in ANALYSIS_SOURCES)
 
 
 def race_cfg_hash(race):

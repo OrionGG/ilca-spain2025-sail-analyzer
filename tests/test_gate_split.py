@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 
 from tests import support  # noqa: F401
-import regatta as R
+from sail_analyzer import regatta as R
 
 
 def buoys(cw):
