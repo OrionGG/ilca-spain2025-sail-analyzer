@@ -3,7 +3,7 @@
 // It drives the page only through its DOM (race / focus / compare selectors, tab buttons,
 // #tabbody), so it keeps working while the scripts behind the page are restructured.
 // The page contract it relies on: #raceSel, #focusSel, #partnerSel, #tabs button[data-tab],
-// #tabbody, #resetOrigBtn (shown when a race has hand-placed marks).
+// #tabbody, and hand-placed marks stored in localStorage as "sa_marks_<race key>".
 //
 // Use (see tests/README.md): open the app on the copa2025 regatta, paste this file into the
 // browser console (or run it through a browser tool), then
@@ -30,29 +30,33 @@ async function uiSnapshot(opt = {}) {
     }
     throw new Error('page did not settle');
   };
-  const pick = async (sel, value) => {
+  const pick = async (sel, value, force) => {
     const el = $(sel);
-    if (el.value === String(value)) return;
+    if (el.value === String(value) && !force) return;
     el.value = String(value);
     el.dispatchEvent(new Event('change'));
   };
+  // hand-placed marks live in localStorage ("sa_marks_<race key>") and change every tab
+  const handPlaced = (() => {
+    try { return Object.keys(localStorage).filter(k => k.startsWith('sa_marks_') && localStorage.getItem(k)).length; }
+    catch (e) { return null; }
+  })();
   const raceSel = $('#raceSel');
   const races = [...raceSel.options].map(o => ({ value: o.value, name: o.textContent.split('·')[0].trim() }));
   const tabs = [...document.querySelectorAll('#tabs button[data-tab]')].map(b => b.dataset.tab);
-  const out = { app: 'sail-analyzer-ui-snapshot', version: 1, focus: FOCUS, tabs, races: [] };
+  const out = { app: 'sail-analyzer-ui-snapshot', version: 2, focus: FOCUS, handPlacedMarks: handPlaced, tabs, races: [] };
   for (const r of races) {
     if (opt.races && !opt.races.includes(r.name)) continue;
-    if (raceSel.value !== r.value) {
-      // the loaded race re-renders the tab body: wait for that, not just for the select
-      $('#tabbody').innerHTML = '<i data-snapshot-wait></i>';
-      await pick('#raceSel', r.value);
-      await settle(() => raceSel.value === r.value && !$('#tabbody [data-snapshot-wait]'));
-    }
+    // (re)load every race, even the one shown, so no earlier state (e.g. a leg filter) carries
+    // over; the loaded race re-renders the tab body: wait for that, not just for the select
+    $('#tabbody').innerHTML = '<i data-snapshot-wait></i>';
+    await pick('#raceSel', r.value, true);
+    await settle(() => raceSel.value === r.value && !$('#tabbody [data-snapshot-wait]'));
     if (![...$('#focusSel').options].some(o => o.value === FOCUS))
       throw new Error(`${r.name}: focus boat ${FOCUS} is not in this race`);
     await pick('#focusSel', FOCUS);
     await pick('#partnerSel', '');
-    const row = { race: r.name, manualMarks: $('#resetOrigBtn') ? $('#resetOrigBtn').style.display !== 'none' : null, tabs: {} };
+    const row = { race: r.name, tabs: {} };
     for (const t of tabs) {
       if (opt.tabs && !opt.tabs.includes(t)) continue;
       $(`#tabs button[data-tab="${t}"]`).click();
@@ -67,13 +71,13 @@ async function uiSnapshot(opt = {}) {
 
 function uiCompare(ref, cur) {
   const diffs = [];
+  if (cur.handPlacedMarks) diffs.push(`${cur.handPlacedMarks} race(s) have hand-placed marks — reset them (Edit marks → Reset: original) before comparing`);
   if (ref.focus !== cur.focus) diffs.push(`focus ${ref.focus} -> ${cur.focus}`);
   if (String(ref.tabs) !== String(cur.tabs)) diffs.push(`tabs ${ref.tabs} -> ${cur.tabs}`);
   const byName = Object.fromEntries(cur.races.map(r => [r.race, r]));
   for (const r of ref.races) {
     const c = byName[r.race];
     if (!c) { diffs.push(`${r.race}: missing`); continue; }
-    if (c.manualMarks) diffs.push(`${r.race}: has hand-placed marks — reset them before comparing`);
     for (const [t, v] of Object.entries(r.tabs)) {
       const w = c.tabs[t];
       if (!w) diffs.push(`${r.race} / ${t}: missing`);

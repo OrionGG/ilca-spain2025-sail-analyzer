@@ -1,7 +1,8 @@
 {
  "app": "sail-analyzer-ui-snapshot",
- "version": 1,
+ "version": 2,
  "focus": "206341",
+ "handPlacedMarks": 0,
  "tabs": [
   "overview",
   "debrief",
@@ -16,7 +17,6 @@
  "races": [
   {
    "race": "Prueba 1",
-   "manualMarks": false,
    "tabs": {
     "overview": {
      "h": "b1fcf57a0347db936418",
@@ -58,7 +58,6 @@
   },
   {
    "race": "Prueba 2",
-   "manualMarks": false,
    "tabs": {
     "overview": {
      "h": "33cd319d60100fd53c9c",
@@ -100,7 +99,6 @@
   },
   {
    "race": "Prueba 3",
-   "manualMarks": false,
    "tabs": {
     "overview": {
      "h": "0b21051fa4e264102d96",
@@ -142,7 +140,6 @@
   },
   {
    "race": "Prueba 4",
-   "manualMarks": false,
    "tabs": {
     "overview": {
      "h": "c2cc2aa12afd3c6b3851",
@@ -184,7 +181,6 @@
   },
   {
    "race": "Prueba 5",
-   "manualMarks": false,
    "tabs": {
     "overview": {
      "h": "42013b13498fa3e27ad4",
@@ -226,7 +222,6 @@
   },
   {
    "race": "Prueba 6",
-   "manualMarks": false,
    "tabs": {
     "overview": {
      "h": "89be564dfc292ee400cc",
@@ -268,7 +263,6 @@
   },
   {
    "race": "Prueba 7",
-   "manualMarks": false,
    "tabs": {
     "overview": {
      "h": "506ca6f51aef4ffa8666",
@@ -310,7 +304,6 @@
   },
   {
    "race": "Prueba 8",
-   "manualMarks": false,
    "tabs": {
     "overview": {
      "h": "921e60536205808872ae",
@@ -352,7 +345,6 @@
   },
   {
    "race": "Prueba 9",
-   "manualMarks": false,
    "tabs": {
     "overview": {
      "h": "a223bd86cce063823c6e",

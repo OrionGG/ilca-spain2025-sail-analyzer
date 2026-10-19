@@ -2,7 +2,8 @@
 
 Each race's analysis must reproduce the reference bit for bit: every section of the output
 (metadata, marks, start line, wind series, fleet stats, each boat, the regatta-index entry)
-is pinned by a hash. A readable summary (marks, legs, course indices, roundings, summary
+is pinned by a hash, both from the analysis itself and through the path the API serves
+(fresh registry -> ensure_cache: analyse, cache, meta entry -> regatta index). A readable summary (marks, legs, course indices, roundings, summary
 metrics) is compared too, with a small float tolerance, so a failure shows what moved.
 
 Runs with the rest of the suite (~10 s); SAIL_GOLDEN=0 skips it. Only this test:
@@ -16,7 +17,9 @@ import hashlib
 import json
 import math
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 
 try:
@@ -35,6 +38,28 @@ def races():
 
 def build(race):
     return A.build_race(A.race_dir_abs(race), race["name"], race["course"], race.get("gun"), race.get("key"))
+
+
+def served():
+    """The path the app serves: a fresh registry (seeded from the repo's race folders) and
+    ensure_cache (analyse, cache + meta entry, index) on temporary folders. Returns
+    (index, {race id: cached race})."""
+    tmp = tempfile.mkdtemp(prefix="sa_golden_")
+    saved = {k: getattr(A, k) for k in ("REG_PATH", "CACHE_DIR", "UPLOAD_DIR")}
+    try:
+        A.REG_PATH = os.path.join(tmp, "regattas.json")
+        A.CACHE_DIR = os.path.join(tmp, "cache")
+        A.UPLOAD_DIR = os.path.join(tmp, "data")
+        index = A.ensure_cache("copa2025")
+        return index, {r["id"]: A._read_json(A.race_cache_path("copa2025", r["id"])) for r in races()}
+    finally:
+        for k, v in saved.items():
+            setattr(A, k, v)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def index_snapshot(index):
+    return {"races": [[e["i"], e["id"], e["race"], e["n_boats"]] for e in index], "sha": sha(index)}
 
 
 def sha(obj):
@@ -91,7 +116,7 @@ class GoldenAnalysis(unittest.TestCase):
         """Every reference is checked: the races found are exactly those with a reference."""
         found = {r["id"]: r["name"] for r in races()}
         refs = {}
-        for path in sorted(glob.glob(os.path.join(DIR, "*.json"))):
+        for path in sorted(glob.glob(os.path.join(DIR, "r*.json"))):
             with open(path, encoding="utf-8") as fh:
                 refs[os.path.basename(path)[:-5]] = json.load(fh)["summary"]["meta"]["race"]
         self.assertEqual(found, refs)
@@ -108,16 +133,35 @@ class GoldenAnalysis(unittest.TestCase):
                                  if ref["sections"].get(k) != got["sections"].get(k))
                 self.assertFalse(changed, f"output sections changed (not bit-identical): {changed}")
 
+    def test_served_path(self):
+        """Through the cache and index the API serves, the races are the same, bit for bit."""
+        index, cached = served()
+        with open(os.path.join(DIR, "index.json"), encoding="utf-8") as fh:
+            ref = json.load(fh)
+        got = index_snapshot(index)
+        self.assertEqual(got["races"], ref["races"])
+        self.assertEqual(got["sha"], ref["sha"], "regatta index changed (not bit-identical)")
+        for i, race in enumerate(races()):
+            with self.subTest(race=race["name"]):
+                with open(golden_path(race), encoding="utf-8") as fh:
+                    want = json.load(fh)["sections"]
+                self.assertIsNotNone(cached[race["id"]], "race not cached")
+                self.assertEqual(snapshot(i, race, cached[race["id"]])["sections"], want)
+
 
 def update():
     os.makedirs(DIR, exist_ok=True)
+    snaps = {race["id"]: snapshot(i, race, build(race)) for i, race in enumerate(races())}
+    index, _cached = served()
+    files = {f"{rid}.json": snap for rid, snap in snaps.items()}
+    files["index.json"] = index_snapshot(index)
     for path in glob.glob(os.path.join(DIR, "*.json")):          # no stale references left
         os.remove(path)
-    for i, race in enumerate(races()):
-        with open(golden_path(race), "w", encoding="utf-8", newline="\n") as fh:
-            json.dump(snapshot(i, race, build(race)), fh, indent=1, sort_keys=True)
+    for name, obj in files.items():
+        with open(os.path.join(DIR, name), "w", encoding="utf-8", newline="\n") as fh:
+            json.dump(obj, fh, indent=1, sort_keys=True)
             fh.write("\n")
-        print("wrote", golden_path(race))
+        print("wrote", name)
 
 
 if __name__ == "__main__":
