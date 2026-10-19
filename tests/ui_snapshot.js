@@ -48,12 +48,13 @@ async function uiSnapshot(opt = {}) {
   // hand-placed marks live in localStorage as "sa_marks_<race key>" and change every tab: look up
   // each race's current key (GET /api/race/<regatta>/<race> returns it), so marks kept for other
   // regattas or left over from an old course don't count; null = could not check
+  const rid = $('#regSel').value, wanted = name => !opt.races || opt.races.includes(name);
   const handPlaced = await (async () => {
     try {
-      const rid = $('#regSel').value;
       const idx = await (await fetch(`/api/index/${rid}`)).json();
       let n = 0;
       for (const e of idx) {
+        if (!wanted(e.race)) continue;
         const race = await (await fetch(`/api/race/${rid}/${e.id}`)).json();
         if (!race.key) return null;
         if (localStorage.getItem('sa_marks_' + race.key)) n++;
@@ -61,10 +62,19 @@ async function uiSnapshot(opt = {}) {
       return n;
     } catch (e) { return null; }
   })();
+  // each race's setup (course, gun) from GET /api/regattas: the rendering depends on it, so a
+  // snapshot is only comparable with one taken on the same setup; null = could not read
+  const setup = await (async () => {
+    try {
+      const g = (await (await fetch('/api/regattas')).json()).regattas.find(x => x.id === rid);
+      return Object.fromEntries(g.races.filter(r => wanted(r.name)).map(r => [r.name, {
+        course: r.course.map(l => `${l.type}:${l.mark}${l.gate ? '*' : ''}`).join(' '), gun: r.gun ?? null }]));
+    } catch (e) { return null; }
+  })();
   const tabs = [...document.querySelectorAll('#tabs button[data-tab]')].map(b => b.dataset.tab);
-  const out = { app: 'sail-analyzer-ui-snapshot', version: 2, focus: FOCUS, handPlacedMarks: handPlaced, tabs, races: [] };
+  const out = { app: 'sail-analyzer-ui-snapshot', version: 3, focus: FOCUS, handPlacedMarks: handPlaced, setup, tabs, races: [] };
   for (const r of races) {
-    if (opt.races && !opt.races.includes(r.name)) continue;
+    if (!wanted(r.name)) continue;
     // (re)load every race, even the one shown, so no earlier state (e.g. a leg filter) carries over
     await pick('#raceSel', r.value, true);
     if (![...$('#focusSel').options].some(o => o.value === FOCUS))
@@ -93,9 +103,13 @@ function uiCompare(ref, cur) {
   if (ref.focus !== cur.focus) diffs.push(`focus ${ref.focus} -> ${cur.focus}`);
   if (String(ref.tabs) !== String(cur.tabs)) diffs.push(`tabs ${ref.tabs} -> ${cur.tabs}`);
   const byName = Object.fromEntries(cur.races.map(r => [r.race, r]));
+  if (!cur.setup) diffs.push('could not read the races\' setup (course, gun)');
   for (const r of ref.races) {
     const c = byName[r.race];
     if (!c) { diffs.push(`${r.race}: missing`); continue; }
+    const want = ref.setup && ref.setup[r.race], got = cur.setup && cur.setup[r.race];
+    if (want && got && JSON.stringify(want) !== JSON.stringify(got))
+      diffs.push(`${r.race}: race setup differs from the reference (${JSON.stringify(got)} vs ${JSON.stringify(want)}) — not comparable`);
     for (const [t, v] of Object.entries(r.tabs)) {
       const w = c.tabs[t];
       if (!w) diffs.push(`${r.race} / ${t}: missing`);

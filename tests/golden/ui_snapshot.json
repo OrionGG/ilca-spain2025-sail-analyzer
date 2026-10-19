@@ -1,8 +1,46 @@
 {
  "app": "sail-analyzer-ui-snapshot",
- "version": 2,
+ "version": 3,
  "focus": "206341",
  "handPlacedMarks": 0,
+ "setup": {
+  "Prueba 1": {
+   "course": "U:1 R:2 D:G* U:2 D:G* R:F",
+   "gun": null
+  },
+  "Prueba 2": {
+   "course": "U:1 R:2a D:G* U:2b D:G* R:F",
+   "gun": null
+  },
+  "Prueba 3": {
+   "course": "U:1 R:2 D:G* U:2 D:G* R:F",
+   "gun": null
+  },
+  "Prueba 4": {
+   "course": "U:1 R:2 D:G* U:2 D:G* R:F",
+   "gun": null
+  },
+  "Prueba 5": {
+   "course": "U:1 R:2a D:G* U:2b D:G* R:F",
+   "gun": null
+  },
+  "Prueba 6": {
+   "course": "U:1 R:2 D:G* U:2 D:G* R:F",
+   "gun": null
+  },
+  "Prueba 7": {
+   "course": "U:1 R:2 D:G* U:2 D:G* R:F",
+   "gun": null
+  },
+  "Prueba 8": {
+   "course": "U:1 R:2 D:G* U:2 D:G* R:F",
+   "gun": null
+  },
+  "Prueba 9": {
+   "course": "U:1 R:2 D:G* U:2 D:G* R:F",
+   "gun": null
+  }
+ },
  "tabs": [
   "overview",
   "debrief",
@@ -385,5 +423,5 @@
    }
   }
  ],
- "note": "Reference rendered from main 0e4f046 on the copa2025 regatta with the official results downloaded (date masked), focus 206341, no compare boat, no hand-placed marks. See tests/README.md."
+ "note": "Reference rendered from main 0e4f046 on the copa2025 regatta in its seeded setup (see 'setup'), official results downloaded (date masked), focus 206341, no compare boat, no hand-placed marks. See tests/README.md."
 }

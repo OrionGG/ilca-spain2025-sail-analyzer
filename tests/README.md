@@ -47,6 +47,9 @@ localStorage as `sa_marks_<race key>`, with each race's current key taken from
 - It masks the official results' download date, so re-downloading them doesn't change the snapshot.
 - It counts hand-placed marks only for the races being snapshotted, under each race's current
   key. Marks of other regattas or left over from an old course don't count.
+- It records each race's setup (course, gun). `uiCompare` reports a race whose setup differs
+  from the reference as "not comparable". The reference uses the seeded setup: outer trapezoid,
+  races 2 and 5 with the moved wing mark, no manual gun.
 
 1. Start the verify server: `python sail_analyzer/app.py --port 8771` (or the `sail-verify`
    launch config).
