@@ -1,0 +1,3403 @@
+{
+ "sections": {
+  "boat 165434": "7c6b00d8dba8eb4af837",
+  "boat 196717": "5f580cf011ce05f64336",
+  "boat 206341": "696bb4cb6a08f980edfa",
+  "boat 206433": "b278b242cb5ee4bef6c5",
+  "boat 211115": "1fde910850c5884388b0",
+  "boat 211436": "6ff6a7705a69d6a6ef08",
+  "boat 212354": "ee7bd2caf04706887c1e",
+  "boat 212517": "cb44af6bc011762437de",
+  "boat 214487": "9b7829489a0ac5d83706",
+  "boat 215314": "7ca25424b7f41cc936b9",
+  "boat 216095": "5495df911f5153eec654",
+  "boat 216185": "18125b0e540a78ecab20",
+  "boat 216441": "b65d6da9a666c2083d23",
+  "boat 217170": "59e20a34790948fe5b10",
+  "boat 217175": "e75b0ff3d245a86d76dc",
+  "boat 217181": "fa817db3d2788784144d",
+  "boat 217196": "a500b0d75e218718af35",
+  "boat 217328": "5996d1c47013529c569e",
+  "boat 217999": "0b7c1d5ec96464932c13",
+  "boat 218003": "157766fd111d5559e4d5",
+  "boat 218493": "f195c3d909f4db432d7e",
+  "boat 218918": "5627a68726c0f6f54fae",
+  "boat 219493": "0bef5bad7bb0c13029bd",
+  "boat 220035": "9b83b88eb87ec97d3381",
+  "boat 220172": "834a2857a5dca906e0e4",
+  "boat 220377": "4d5cccb71a40cd0cfa67",
+  "boat 220637": "57db1e74e3437be18c7d",
+  "boat 221172": "2e6c8164e01e2abe74aa",
+  "boat 221275": "6a6d2c87cd75962cb569",
+  "boat 221281": "e518de2e083a77dbf90d",
+  "boat 221326": "77b5b958dfcde8843ef2",
+  "boat 221378": "1a239451cecc889ddf48",
+  "boat 221425": "85bc9c2ad83a82c2256e",
+  "boat 222666": "91c5b8fffc23663f7250",
+  "boat 222832": "97097dbf578028a60ecc",
+  "boat 223123": "059104da642208f60fd3",
+  "boat 223156": "7d6c6a1665cbbc2778d6",
+  "boat 223705": "ccf1b22bc0b00acda89a",
+  "boat 223872": "122f2b29fc1dfc95b2f7",
+  "boat 224023": "69c9f331f5dc6ae24d5a",
+  "boat 224031": "f5e181dcfc62b5e3b15f",
+  "boat 224034": "a1bfdae15a0ae88a672a",
+  "boat 224113": "0d9584355bf1913d1a7c",
+  "boat 224316": "5f1f7329ad8f5a0d915b",
+  "boat 224683": "ef3388d3f0951e55ce48",
+  "boat 224816": "89d5d6dde386f273848f",
+  "boat 225658": "4850300d2750325e9463",
+  "boat 225749": "f3310fbd527ad6b297dc",
+  "boat 226538": "ccf8f0d2b4e42e955267",
+  "fleet_stats": "d97377ac0127ca33a3d5",
+  "index_entry": "c0ff57a17463b5ad502d",
+  "marks": "f8afd68777025f80ddb9",
+  "meta": "a36ef0d51aeec954af4d",
+  "start_line": "67cd0bfd6ea4d98c6226",
+  "wind_series": "99c24388194c2d04ed1e"
+ },
+ "summary": {
+  "boats": {
+   "165434": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      209,
+      "upwind"
+     ],
+     [
+      209,
+      246,
+      "reach"
+     ],
+     [
+      246,
+      340,
+      "downwind"
+     ],
+     [
+      340,
+      471,
+      "upwind"
+     ],
+     [
+      471,
+      666,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 8,
+    "n_penalties": 0,
+    "name": "VANBELLINGE",
+    "rounds": [
+     1758287560,
+     1758287790,
+     1758288205,
+     1758288880,
+     1758289330
+    ],
+    "summary": {
+     "dist_nm": 3.68,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.75,
+     "n": 608,
+     "n_gybes": 4,
+     "n_legs": 5,
+     "n_tacks": 4,
+     "race_min": 46.58,
+     "sog_dn": 4.97,
+     "sog_mean": 4.76,
+     "sog_up": 4.36,
+     "tack_loss": 2.13,
+     "twa_dn": 167.0,
+     "twa_up": 46.0,
+     "vmg_dn": 4.24,
+     "vmg_up": 2.95
+    }
+   },
+   "196717": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      198,
+      "upwind"
+     ],
+     [
+      198,
+      238,
+      "reach"
+     ],
+     [
+      238,
+      326,
+      "downwind"
+     ],
+     [
+      326,
+      448,
+      "upwind"
+     ],
+     [
+      448,
+      663,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 16,
+    "n_penalties": 0,
+    "name": "PONSETI MES",
+    "rounds": [
+     1758287500,
+     1758287741,
+     1758288136,
+     1758288786,
+     1758289216
+    ],
+    "summary": {
+     "dist_nm": 3.82,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 0.6,
+     "n": 605,
+     "n_gybes": 8,
+     "n_legs": 5,
+     "n_tacks": 8,
+     "race_min": 46.58,
+     "sog_dn": 5.08,
+     "sog_mean": 4.87,
+     "sog_up": 4.66,
+     "tack_loss": 0.64,
+     "twa_dn": 165.0,
+     "twa_up": 48.0,
+     "vmg_dn": 4.37,
+     "vmg_up": 3.18
+    }
+   },
+   "206341": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      60,
+      207,
+      "upwind"
+     ],
+     [
+      207,
+      239,
+      "reach"
+     ],
+     [
+      239,
+      332,
+      "downwind"
+     ],
+     [
+      332,
+      467,
+      "upwind"
+     ],
+     [
+      467,
+      664,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 14,
+    "n_penalties": 0,
+    "name": "GARCIA GALL",
+    "rounds": [
+     1758287512,
+     1758287747,
+     1758288167,
+     1758288867,
+     1758289291
+    ],
+    "summary": {
+     "dist_nm": 3.6,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.67,
+     "n": 605,
+     "n_gybes": 7,
+     "n_legs": 5,
+     "n_tacks": 7,
+     "race_min": 46.57,
+     "sog_dn": 4.9,
+     "sog_mean": 4.56,
+     "sog_up": 4.27,
+     "tack_loss": 1.39,
+     "twa_dn": 166.0,
+     "twa_up": 46.0,
+     "vmg_dn": 4.14,
+     "vmg_up": 2.96
+    }
+   },
+   "206433": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      205,
+      "upwind"
+     ],
+     [
+      205,
+      238,
+      "reach"
+     ],
+     [
+      238,
+      332,
+      "downwind"
+     ],
+     [
+      332,
+      455,
+      "upwind"
+     ],
+     [
+      455,
+      648,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 14,
+    "n_penalties": 0,
+    "name": "MAJON",
+    "rounds": [
+     1758287523,
+     1758287752,
+     1758288162,
+     1758288818,
+     1758289260
+    ],
+    "summary": {
+     "dist_nm": 3.5,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 2.3,
+     "n": 590,
+     "n_gybes": 7,
+     "n_legs": 5,
+     "n_tacks": 7,
+     "race_min": 45.8,
+     "sog_dn": 4.8,
+     "sog_mean": 4.5,
+     "sog_up": 4.3,
+     "tack_loss": 1.38,
+     "twa_dn": 173.0,
+     "twa_up": 43.0,
+     "vmg_dn": 4.2,
+     "vmg_up": 3.08
+    }
+   },
+   "211115": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      190,
+      "upwind"
+     ],
+     [
+      190,
+      222,
+      "reach"
+     ],
+     [
+      222,
+      311,
+      "downwind"
+     ],
+     [
+      311,
+      430,
+      "upwind"
+     ],
+     [
+      430,
+      662,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 13,
+    "n_penalties": 0,
+    "name": "SUAREZ PERE",
+    "rounds": [
+     1758287450,
+     1758287660,
+     1758288065,
+     1758288645,
+     1758289110
+    ],
+    "summary": {
+     "dist_nm": 3.55,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.04,
+     "n": 604,
+     "n_gybes": 8,
+     "n_legs": 5,
+     "n_tacks": 5,
+     "race_min": 46.58,
+     "sog_dn": 3.82,
+     "sog_mean": 4.32,
+     "sog_up": 4.62,
+     "tack_loss": 1.57,
+     "twa_dn": 161.0,
+     "twa_up": 45.0,
+     "vmg_dn": 3.4,
+     "vmg_up": 3.32
+    }
+   },
+   "211436": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      60,
+      200,
+      "upwind"
+     ],
+     [
+      200,
+      230,
+      "reach"
+     ],
+     [
+      230,
+      317,
+      "downwind"
+     ],
+     [
+      317,
+      434,
+      "upwind"
+     ],
+     [
+      434,
+      663,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 17,
+    "n_penalties": 0,
+    "name": "BARRETO HAS",
+    "rounds": [
+     1758287491,
+     1758287706,
+     1758288081,
+     1758288691,
+     1758289101
+    ],
+    "summary": {
+     "dist_nm": 3.89,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 2.3,
+     "n": 604,
+     "n_gybes": 9,
+     "n_legs": 5,
+     "n_tacks": 8,
+     "race_min": 44.25,
+     "sog_dn": 5.23,
+     "sog_mean": 4.98,
+     "sog_up": 4.47,
+     "tack_loss": 1.71,
+     "twa_dn": 156.0,
+     "twa_up": 43.0,
+     "vmg_dn": 4.46,
+     "vmg_up": 3.26
+    }
+   },
+   "212354": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      60,
+      203,
+      "upwind"
+     ],
+     [
+      203,
+      233,
+      "reach"
+     ],
+     [
+      233,
+      326,
+      "downwind"
+     ],
+     [
+      326,
+      450,
+      "upwind"
+     ],
+     [
+      450,
+      661,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 17,
+    "n_penalties": 0,
+    "name": "BENEYTO LAN",
+    "rounds": [
+     1758287512,
+     1758287727,
+     1758288132,
+     1758288737,
+     1758289217
+    ],
+    "summary": {
+     "dist_nm": 3.77,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.3,
+     "n": 602,
+     "n_gybes": 10,
+     "n_legs": 5,
+     "n_tacks": 7,
+     "race_min": 46.55,
+     "sog_dn": 4.91,
+     "sog_mean": 4.81,
+     "sog_up": 4.49,
+     "tack_loss": 0.69,
+     "twa_dn": 156.0,
+     "twa_up": 46.0,
+     "vmg_dn": 4.07,
+     "vmg_up": 3.15
+    }
+   },
+   "212517": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      60,
+      192,
+      "upwind"
+     ],
+     [
+      192,
+      219,
+      "reach"
+     ],
+     [
+      219,
+      303,
+      "downwind"
+     ],
+     [
+      303,
+      422,
+      "upwind"
+     ],
+     [
+      422,
+      664,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 18,
+    "n_penalties": 0,
+    "name": "SUAREZ PERE",
+    "rounds": [
+     1758287426,
+     1758287646,
+     1758288016,
+     1758288631,
+     1758289036
+    ],
+    "summary": {
+     "dist_nm": 3.83,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.05,
+     "n": 605,
+     "n_gybes": 8,
+     "n_legs": 5,
+     "n_tacks": 10,
+     "race_min": 45.35,
+     "sog_dn": 4.81,
+     "sog_mean": 4.83,
+     "sog_up": 4.56,
+     "tack_loss": 2.34,
+     "twa_dn": 149.0,
+     "twa_up": 43.0,
+     "vmg_dn": 4.13,
+     "vmg_up": 3.35
+    }
+   },
+   "214487": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      202,
+      "upwind"
+     ],
+     [
+      202,
+      236,
+      "reach"
+     ],
+     [
+      236,
+      325,
+      "downwind"
+     ],
+     [
+      325,
+      453,
+      "upwind"
+     ],
+     [
+      453,
+      663,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 19,
+    "n_penalties": 0,
+    "name": "AMBROSINI G",
+    "rounds": [
+     1758287468,
+     1758287733,
+     1758288133,
+     1758288739,
+     1758289214
+    ],
+    "summary": {
+     "dist_nm": 3.76,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.59,
+     "n": 605,
+     "n_gybes": 13,
+     "n_legs": 5,
+     "n_tacks": 6,
+     "race_min": 46.32,
+     "sog_dn": 5.12,
+     "sog_mean": 4.83,
+     "sog_up": 4.37,
+     "tack_loss": 1.38,
+     "twa_dn": 159.0,
+     "twa_up": 44.0,
+     "vmg_dn": 4.24,
+     "vmg_up": 3.15
+    }
+   },
+   "215314": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      60,
+      200,
+      "upwind"
+     ],
+     [
+      200,
+      232,
+      "reach"
+     ],
+     [
+      232,
+      327,
+      "downwind"
+     ],
+     [
+      327,
+      455,
+      "upwind"
+     ],
+     [
+      455,
+      664,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 13,
+    "n_penalties": 0,
+    "name": "ROLDAN MEJI",
+    "rounds": [
+     1758287511,
+     1758287721,
+     1758288136,
+     1758288746,
+     1758289236
+    ],
+    "summary": {
+     "dist_nm": 3.79,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 2.3,
+     "n": 605,
+     "n_gybes": 7,
+     "n_legs": 5,
+     "n_tacks": 6,
+     "race_min": 46.52,
+     "sog_dn": 5.02,
+     "sog_mean": 4.87,
+     "sog_up": 4.48,
+     "tack_loss": 2.33,
+     "twa_dn": 163.0,
+     "twa_up": 45.0,
+     "vmg_dn": 4.16,
+     "vmg_up": 3.13
+    }
+   },
+   "216095": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      60,
+      198,
+      "upwind"
+     ],
+     [
+      198,
+      231,
+      "reach"
+     ],
+     [
+      231,
+      321,
+      "downwind"
+     ],
+     [
+      321,
+      449,
+      "upwind"
+     ],
+     [
+      449,
+      666,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 17,
+    "n_penalties": 0,
+    "name": "LISORGUES E",
+    "rounds": [
+     1758287496,
+     1758287712,
+     1758288112,
+     1758288727,
+     1758289217
+    ],
+    "summary": {
+     "dist_nm": 3.72,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 0.88,
+     "n": 607,
+     "n_gybes": 7,
+     "n_legs": 5,
+     "n_tacks": 10,
+     "race_min": 46.3,
+     "sog_dn": 5.02,
+     "sog_mean": 4.79,
+     "sog_up": 4.33,
+     "tack_loss": 1.0,
+     "twa_dn": 161.0,
+     "twa_up": 42.0,
+     "vmg_dn": 4.15,
+     "vmg_up": 3.19
+    }
+   },
+   "216185": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      196,
+      "upwind"
+     ],
+     [
+      196,
+      228,
+      "reach"
+     ],
+     [
+      228,
+      321,
+      "downwind"
+     ],
+     [
+      321,
+      443,
+      "upwind"
+     ],
+     [
+      443,
+      652,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 15,
+    "n_penalties": 0,
+    "name": "LORENZO NIE",
+    "rounds": [
+     1758287480,
+     1758287700,
+     1758288105,
+     1758288735,
+     1758289175
+    ],
+    "summary": {
+     "dist_nm": 3.78,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.43,
+     "n": 594,
+     "n_gybes": 7,
+     "n_legs": 5,
+     "n_tacks": 8,
+     "race_min": 45.42,
+     "sog_dn": 5.04,
+     "sog_mean": 4.85,
+     "sog_up": 4.42,
+     "tack_loss": 1.55,
+     "twa_dn": 163.0,
+     "twa_up": 42.0,
+     "vmg_dn": 4.33,
+     "vmg_up": 3.27
+    }
+   },
+   "216441": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      196,
+      "upwind"
+     ],
+     [
+      196,
+      230,
+      "reach"
+     ],
+     [
+      230,
+      322,
+      "downwind"
+     ],
+     [
+      322,
+      450,
+      "upwind"
+     ],
+     [
+      450,
+      652,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 14,
+    "n_penalties": 0,
+    "name": "TORREGROSA",
+    "rounds": [
+     1758287518,
+     1758287778,
+     1758288197,
+     1758288838,
+     1758289280
+    ],
+    "summary": {
+     "dist_nm": 3.64,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.48,
+     "n": 594,
+     "n_gybes": 7,
+     "n_legs": 5,
+     "n_tacks": 7,
+     "race_min": 46.58,
+     "sog_dn": 4.95,
+     "sog_mean": 4.71,
+     "sog_up": 4.18,
+     "tack_loss": 1.93,
+     "twa_dn": 166.0,
+     "twa_up": 44.0,
+     "vmg_dn": 4.33,
+     "vmg_up": 3.0
+    }
+   },
+   "217170": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      193,
+      "upwind"
+     ],
+     [
+      193,
+      223,
+      "reach"
+     ],
+     [
+      223,
+      317,
+      "downwind"
+     ],
+     [
+      317,
+      444,
+      "upwind"
+     ],
+     [
+      444,
+      664,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 14,
+    "n_penalties": 0,
+    "name": "FARGAS CEND",
+    "rounds": [
+     1758287473,
+     1758287678,
+     1758288088,
+     1758288758,
+     1758289183
+    ],
+    "summary": {
+     "dist_nm": 3.83,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 2.58,
+     "n": 606,
+     "n_gybes": 9,
+     "n_legs": 5,
+     "n_tacks": 5,
+     "race_min": 45.33,
+     "sog_dn": 5.0,
+     "sog_mean": 4.92,
+     "sog_up": 4.56,
+     "tack_loss": 0.44,
+     "twa_dn": 167.0,
+     "twa_up": 46.0,
+     "vmg_dn": 4.31,
+     "vmg_up": 3.17
+    }
+   },
+   "217175": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      189,
+      "upwind"
+     ],
+     [
+      189,
+      218,
+      "reach"
+     ],
+     [
+      218,
+      304,
+      "downwind"
+     ],
+     [
+      304,
+      426,
+      "upwind"
+     ],
+     [
+      426,
+      664,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 18,
+    "n_penalties": 1,
+    "name": "VIRGILI PAS",
+    "rounds": [
+     1758287442,
+     1758287642,
+     1758288012,
+     1758288648,
+     1758289057
+    ],
+    "summary": {
+     "dist_nm": 4.02,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.0,
+     "n": 606,
+     "n_gybes": 7,
+     "n_legs": 5,
+     "n_tacks": 11,
+     "race_min": 43.27,
+     "sog_dn": 5.29,
+     "sog_mean": 5.12,
+     "sog_up": 4.69,
+     "tack_loss": 1.03,
+     "twa_dn": 150.0,
+     "twa_up": 46.0,
+     "vmg_dn": 4.46,
+     "vmg_up": 3.35
+    }
+   },
+   "217181": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      189,
+      "upwind"
+     ],
+     [
+      189,
+      223,
+      "reach"
+     ],
+     [
+      223,
+      316,
+      "downwind"
+     ],
+     [
+      316,
+      441,
+      "upwind"
+     ],
+     [
+      441,
+      662,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 20,
+    "n_penalties": 0,
+    "name": "ORIHUELA CA",
+    "rounds": [
+     1758287430,
+     1758287669,
+     1758288079,
+     1758288725,
+     1758289170
+    ],
+    "summary": {
+     "dist_nm": 3.74,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 3.28,
+     "n": 604,
+     "n_gybes": 10,
+     "n_legs": 5,
+     "n_tacks": 10,
+     "race_min": 45.32,
+     "sog_dn": 5.06,
+     "sog_mean": 4.82,
+     "sog_up": 4.36,
+     "tack_loss": 1.9,
+     "twa_dn": 169.0,
+     "twa_up": 42.0,
+     "vmg_dn": 4.34,
+     "vmg_up": 3.27
+    }
+   },
+   "217196": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      194,
+      "upwind"
+     ],
+     [
+      194,
+      229,
+      "reach"
+     ],
+     [
+      229,
+      316,
+      "downwind"
+     ],
+     [
+      316,
+      432,
+      "upwind"
+     ],
+     [
+      432,
+      669,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 17,
+    "n_penalties": 0,
+    "name": "SEGUI MEANR",
+    "rounds": [
+     1758287478,
+     1758287693,
+     1758288083,
+     1758288673,
+     1758289093
+    ],
+    "summary": {
+     "dist_nm": 3.92,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 2.22,
+     "n": 611,
+     "n_gybes": 9,
+     "n_legs": 5,
+     "n_tacks": 8,
+     "race_min": 44.05,
+     "sog_dn": 5.16,
+     "sog_mean": 5.0,
+     "sog_up": 4.62,
+     "tack_loss": 1.86,
+     "twa_dn": 155.0,
+     "twa_up": 45.0,
+     "vmg_dn": 4.4,
+     "vmg_up": 3.33
+    }
+   },
+   "217328": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      212,
+      "upwind"
+     ],
+     [
+      212,
+      251,
+      "reach"
+     ],
+     [
+      251,
+      346,
+      "downwind"
+     ],
+     [
+      346,
+      481,
+      "upwind"
+     ],
+     [
+      481,
+      663,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 12,
+    "n_penalties": 0,
+    "name": "GASTALDI RO",
+    "rounds": [
+     1758287564,
+     1758287815,
+     1758288230,
+     1758288954,
+     1758289404
+    ],
+    "summary": {
+     "dist_nm": 3.43,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 4.68,
+     "n": 605,
+     "n_gybes": 5,
+     "n_legs": 5,
+     "n_tacks": 7,
+     "race_min": 46.55,
+     "sog_dn": 4.65,
+     "sog_mean": 4.43,
+     "sog_up": 4.05,
+     "tack_loss": 1.44,
+     "twa_dn": 173.0,
+     "twa_up": 42.0,
+     "vmg_dn": 4.17,
+     "vmg_up": 2.91
+    }
+   },
+   "217999": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      60,
+      205,
+      "upwind"
+     ],
+     [
+      205,
+      246,
+      "reach"
+     ],
+     [
+      246,
+      340,
+      "downwind"
+     ],
+     [
+      340,
+      470,
+      "upwind"
+     ],
+     [
+      470,
+      663,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 10,
+    "n_penalties": 0,
+    "name": "WRAGG",
+    "rounds": [
+     1758287541,
+     1758287781,
+     1758288206,
+     1758288886,
+     1758289338
+    ],
+    "summary": {
+     "dist_nm": 3.58,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 0.84,
+     "n": 604,
+     "n_gybes": 3,
+     "n_legs": 5,
+     "n_tacks": 7,
+     "race_min": 46.57,
+     "sog_dn": 4.89,
+     "sog_mean": 4.64,
+     "sog_up": 4.17,
+     "tack_loss": 1.02,
+     "twa_dn": 168.0,
+     "twa_up": 43.0,
+     "vmg_dn": 4.14,
+     "vmg_up": 3.05
+    }
+   },
+   "218003": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      60,
+      201,
+      "upwind"
+     ],
+     [
+      201,
+      230,
+      "reach"
+     ],
+     [
+      230,
+      318,
+      "downwind"
+     ],
+     [
+      318,
+      436,
+      "upwind"
+     ],
+     [
+      436,
+      665,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 15,
+    "n_penalties": 0,
+    "name": "GIMENEZ MEZ",
+    "rounds": [
+     1758287481,
+     1758287701,
+     1758288091,
+     1758288691,
+     1758289106
+    ],
+    "summary": {
+     "dist_nm": 3.9,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.27,
+     "n": 606,
+     "n_gybes": 8,
+     "n_legs": 5,
+     "n_tacks": 7,
+     "race_min": 44.93,
+     "sog_dn": 5.19,
+     "sog_mean": 4.95,
+     "sog_up": 4.58,
+     "tack_loss": 1.43,
+     "twa_dn": 154.0,
+     "twa_up": 45.0,
+     "vmg_dn": 4.34,
+     "vmg_up": 3.29
+    }
+   },
+   "218493": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      198,
+      "upwind"
+     ],
+     [
+      198,
+      225,
+      "reach"
+     ],
+     [
+      225,
+      319,
+      "downwind"
+     ],
+     [
+      319,
+      444,
+      "upwind"
+     ],
+     [
+      444,
+      660,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 17,
+    "n_penalties": 0,
+    "name": "PEREZ FERNA",
+    "rounds": [
+     1758287479,
+     1758287688,
+     1758288098,
+     1758288743,
+     1758289168
+    ],
+    "summary": {
+     "dist_nm": 3.83,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 2.35,
+     "n": 602,
+     "n_gybes": 9,
+     "n_legs": 5,
+     "n_tacks": 8,
+     "race_min": 45.37,
+     "sog_dn": 5.04,
+     "sog_mean": 4.9,
+     "sog_up": 4.49,
+     "tack_loss": 0.92,
+     "twa_dn": 163.0,
+     "twa_up": 43.0,
+     "vmg_dn": 4.34,
+     "vmg_up": 3.23
+    }
+   },
+   "218918": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      197,
+      "upwind"
+     ],
+     [
+      197,
+      236,
+      "reach"
+     ],
+     [
+      236,
+      327,
+      "downwind"
+     ],
+     [
+      327,
+      450,
+      "upwind"
+     ],
+     [
+      450,
+      661,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 18,
+    "n_penalties": 0,
+    "name": "COSMELLI MA",
+    "rounds": [
+     1758287480,
+     1758287735,
+     1758288140,
+     1758288800,
+     1758289225
+    ],
+    "summary": {
+     "dist_nm": 3.69,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 2.56,
+     "n": 603,
+     "n_gybes": 10,
+     "n_legs": 5,
+     "n_tacks": 8,
+     "race_min": 46.58,
+     "sog_dn": 4.94,
+     "sog_mean": 4.74,
+     "sog_up": 4.39,
+     "tack_loss": 1.43,
+     "twa_dn": 166.0,
+     "twa_up": 43.0,
+     "vmg_dn": 4.26,
+     "vmg_up": 3.16
+    }
+   },
+   "219493": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      60,
+      189,
+      "upwind"
+     ],
+     [
+      189,
+      229,
+      "reach"
+     ],
+     [
+      229,
+      316,
+      "downwind"
+     ],
+     [
+      316,
+      437,
+      "upwind"
+     ],
+     [
+      437,
+      664,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 13,
+    "n_penalties": 0,
+    "name": "KATELIEV BA",
+    "rounds": [
+     1758287461,
+     1758287681,
+     1758288086,
+     1758288706,
+     1758289131
+    ],
+    "summary": {
+     "dist_nm": 3.83,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.75,
+     "n": 605,
+     "n_gybes": 6,
+     "n_legs": 5,
+     "n_tacks": 7,
+     "race_min": 44.43,
+     "sog_dn": 5.15,
+     "sog_mean": 4.91,
+     "sog_up": 4.48,
+     "tack_loss": 1.35,
+     "twa_dn": 155.0,
+     "twa_up": 43.0,
+     "vmg_dn": 4.33,
+     "vmg_up": 3.3
+    }
+   },
+   "220035": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      60,
+      208,
+      "upwind"
+     ],
+     [
+      208,
+      248,
+      "reach"
+     ],
+     [
+      248,
+      337,
+      "downwind"
+     ],
+     [
+      337,
+      461,
+      "upwind"
+     ],
+     [
+      461,
+      669,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 15,
+    "n_penalties": 0,
+    "name": "POZO NAVARR",
+    "rounds": [
+     1758287552,
+     1758287787,
+     1758288188,
+     1758288818,
+     1758289283
+    ],
+    "summary": {
+     "dist_nm": 3.61,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.38,
+     "n": 610,
+     "n_gybes": 7,
+     "n_legs": 5,
+     "n_tacks": 8,
+     "race_min": 46.55,
+     "sog_dn": 4.88,
+     "sog_mean": 4.67,
+     "sog_up": 4.24,
+     "tack_loss": 1.98,
+     "twa_dn": 169.0,
+     "twa_up": 44.0,
+     "vmg_dn": 4.22,
+     "vmg_up": 3.08
+    }
+   },
+   "220172": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      203,
+      "upwind"
+     ],
+     [
+      203,
+      242,
+      "reach"
+     ],
+     [
+      242,
+      332,
+      "downwind"
+     ],
+     [
+      332,
+      456,
+      "upwind"
+     ],
+     [
+      456,
+      651,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 17,
+    "n_penalties": 0,
+    "name": "GADEA GUTIE",
+    "rounds": [
+     1758287531,
+     1758287766,
+     1758288166,
+     1758288831,
+     1758289286
+    ],
+    "summary": {
+     "dist_nm": 3.54,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.75,
+     "n": 593,
+     "n_gybes": 10,
+     "n_legs": 5,
+     "n_tacks": 7,
+     "race_min": 45.7,
+     "sog_dn": 4.83,
+     "sog_mean": 4.58,
+     "sog_up": 4.4,
+     "tack_loss": 0.73,
+     "twa_dn": 171.0,
+     "twa_up": 45.0,
+     "vmg_dn": 4.29,
+     "vmg_up": 3.08
+    }
+   },
+   "220377": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      60,
+      189,
+      "upwind"
+     ],
+     [
+      189,
+      223,
+      "reach"
+     ],
+     [
+      223,
+      314,
+      "downwind"
+     ],
+     [
+      314,
+      434,
+      "upwind"
+     ],
+     [
+      434,
+      662,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 15,
+    "n_penalties": 0,
+    "name": "JUSTICIA BA",
+    "rounds": [
+     1758287421,
+     1758287661,
+     1758288071,
+     1758288676,
+     1758289101
+    ],
+    "summary": {
+     "dist_nm": 3.89,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.73,
+     "n": 603,
+     "n_gybes": 7,
+     "n_legs": 5,
+     "n_tacks": 8,
+     "race_min": 44.32,
+     "sog_dn": 5.19,
+     "sog_mean": 4.98,
+     "sog_up": 4.52,
+     "tack_loss": 1.7,
+     "twa_dn": 151.0,
+     "twa_up": 42.0,
+     "vmg_dn": 4.37,
+     "vmg_up": 3.35
+    }
+   },
+   "220637": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      186,
+      "upwind"
+     ],
+     [
+      186,
+      218,
+      "reach"
+     ],
+     [
+      218,
+      303,
+      "downwind"
+     ],
+     [
+      303,
+      428,
+      "upwind"
+     ],
+     [
+      428,
+      662,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 16,
+    "n_penalties": 0,
+    "name": "SAMORODNY",
+    "rounds": [
+     1758287434,
+     1758287634,
+     1758288019,
+     1758288624,
+     1758289104
+    ],
+    "summary": {
+     "dist_nm": 3.82,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 2.65,
+     "n": 604,
+     "n_gybes": 8,
+     "n_legs": 5,
+     "n_tacks": 8,
+     "race_min": 44.45,
+     "sog_dn": 5.0,
+     "sog_mean": 4.89,
+     "sog_up": 4.55,
+     "tack_loss": 0.28,
+     "twa_dn": 165.0,
+     "twa_up": 45.0,
+     "vmg_dn": 4.25,
+     "vmg_up": 3.29
+    }
+   },
+   "221172": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      60,
+      197,
+      "upwind"
+     ],
+     [
+      197,
+      234,
+      "reach"
+     ],
+     [
+      234,
+      324,
+      "downwind"
+     ],
+     [
+      324,
+      448,
+      "upwind"
+     ],
+     [
+      448,
+      666,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 19,
+    "n_penalties": 0,
+    "name": "CASALINS DO",
+    "rounds": [
+     1758287501,
+     1758287726,
+     1758288121,
+     1758288781,
+     1758289226
+    ],
+    "summary": {
+     "dist_nm": 3.78,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 2.11,
+     "n": 607,
+     "n_gybes": 11,
+     "n_legs": 5,
+     "n_tacks": 8,
+     "race_min": 46.33,
+     "sog_dn": 4.98,
+     "sog_mean": 4.85,
+     "sog_up": 4.53,
+     "tack_loss": 0.68,
+     "twa_dn": 165.0,
+     "twa_up": 43.0,
+     "vmg_dn": 4.23,
+     "vmg_up": 3.21
+    }
+   },
+   "221275": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      198,
+      "upwind"
+     ],
+     [
+      198,
+      245,
+      "reach"
+     ],
+     [
+      245,
+      332,
+      "downwind"
+     ],
+     [
+      332,
+      459,
+      "upwind"
+     ],
+     [
+      459,
+      668,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 14,
+    "n_penalties": 0,
+    "name": "GARRIGA CAB",
+    "rounds": [
+     1758287520,
+     1758287770,
+     1758288175,
+     1758288805,
+     1758289261
+    ],
+    "summary": {
+     "dist_nm": 3.66,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 2.85,
+     "n": 610,
+     "n_gybes": 6,
+     "n_legs": 5,
+     "n_tacks": 8,
+     "race_min": 46.57,
+     "sog_dn": 5.09,
+     "sog_mean": 4.73,
+     "sog_up": 4.23,
+     "tack_loss": 2.46,
+     "twa_dn": 164.0,
+     "twa_up": 40.0,
+     "vmg_dn": 4.31,
+     "vmg_up": 3.16
+    }
+   },
+   "221281": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      199,
+      "upwind"
+     ],
+     [
+      199,
+      241,
+      "reach"
+     ],
+     [
+      241,
+      332,
+      "downwind"
+     ],
+     [
+      332,
+      463,
+      "upwind"
+     ],
+     [
+      463,
+      661,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 11,
+    "n_penalties": 0,
+    "name": "DE LLANOS N",
+    "rounds": [
+     1758287482,
+     1758287747,
+     1758288162,
+     1758288833,
+     1758289273
+    ],
+    "summary": {
+     "dist_nm": 3.74,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 2.54,
+     "n": 603,
+     "n_gybes": 6,
+     "n_legs": 5,
+     "n_tacks": 5,
+     "race_min": 46.58,
+     "sog_dn": 5.04,
+     "sog_mean": 4.81,
+     "sog_up": 4.45,
+     "tack_loss": 1.53,
+     "twa_dn": 162.0,
+     "twa_up": 46.0,
+     "vmg_dn": 4.32,
+     "vmg_up": 3.09
+    }
+   },
+   "221326": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      198,
+      "upwind"
+     ],
+     [
+      198,
+      240,
+      "reach"
+     ],
+     [
+      240,
+      327,
+      "downwind"
+     ],
+     [
+      327,
+      453,
+      "upwind"
+     ],
+     [
+      453,
+      666,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 8,
+    "n_penalties": 0,
+    "name": "CASTA_O BLA",
+    "rounds": [
+     1758287500,
+     1758287750,
+     1758288145,
+     1758288765,
+     1758289231
+    ],
+    "summary": {
+     "dist_nm": 3.69,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 0.5,
+     "n": 608,
+     "n_gybes": 1,
+     "n_legs": 5,
+     "n_tacks": 7,
+     "race_min": 46.37,
+     "sog_dn": 5.09,
+     "sog_mean": 4.76,
+     "sog_up": 4.27,
+     "tack_loss": 1.59,
+     "twa_dn": 164.0,
+     "twa_up": 42.0,
+     "vmg_dn": 4.34,
+     "vmg_up": 3.12
+    }
+   },
+   "221378": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      60,
+      203,
+      "upwind"
+     ],
+     [
+      203,
+      241,
+      "reach"
+     ],
+     [
+      241,
+      334,
+      "downwind"
+     ],
+     [
+      334,
+      463,
+      "upwind"
+     ],
+     [
+      463,
+      665,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 12,
+    "n_penalties": 0,
+    "name": "ERIC EASTMA",
+    "rounds": [
+     1758287526,
+     1758287761,
+     1758288176,
+     1758288836,
+     1758289282
+    ],
+    "summary": {
+     "dist_nm": 3.72,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.71,
+     "n": 606,
+     "n_gybes": 6,
+     "n_legs": 5,
+     "n_tacks": 6,
+     "race_min": 46.58,
+     "sog_dn": 4.86,
+     "sog_mean": 4.79,
+     "sog_up": 4.51,
+     "tack_loss": 1.72,
+     "twa_dn": 165.0,
+     "twa_up": 48.0,
+     "vmg_dn": 4.23,
+     "vmg_up": 3.09
+    }
+   },
+   "221425": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      196,
+      "upwind"
+     ],
+     [
+      196,
+      241,
+      "reach"
+     ],
+     [
+      241,
+      329,
+      "downwind"
+     ],
+     [
+      329,
+      452,
+      "upwind"
+     ],
+     [
+      452,
+      663,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 17,
+    "n_penalties": 0,
+    "name": "PUIG CAMPS",
+    "rounds": [
+     1758287519,
+     1758287754,
+     1758288149,
+     1758288809,
+     1758289219
+    ],
+    "summary": {
+     "dist_nm": 3.7,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 4.6,
+     "n": 605,
+     "n_gybes": 9,
+     "n_legs": 5,
+     "n_tacks": 8,
+     "race_min": 45.83,
+     "sog_dn": 5.18,
+     "sog_mean": 4.78,
+     "sog_up": 4.18,
+     "tack_loss": 0.73,
+     "twa_dn": 169.0,
+     "twa_up": 38.0,
+     "vmg_dn": 4.47,
+     "vmg_up": 3.18
+    }
+   },
+   "222666": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      191,
+      "upwind"
+     ],
+     [
+      191,
+      218,
+      "reach"
+     ],
+     [
+      218,
+      305,
+      "downwind"
+     ],
+     [
+      305,
+      422,
+      "upwind"
+     ],
+     [
+      422,
+      661,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 15,
+    "n_penalties": 0,
+    "name": "O_CONNOR",
+    "rounds": [
+     1758287424,
+     1758287649,
+     1758288028,
+     1758288634,
+     1758289038
+    ],
+    "summary": {
+     "dist_nm": 4.01,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 0.99,
+     "n": 603,
+     "n_gybes": 6,
+     "n_legs": 5,
+     "n_tacks": 9,
+     "race_min": 42.6,
+     "sog_dn": 5.4,
+     "sog_mean": 5.14,
+     "sog_up": 4.56,
+     "tack_loss": 0.79,
+     "twa_dn": 153.0,
+     "twa_up": 42.0,
+     "vmg_dn": 4.51,
+     "vmg_up": 3.39
+    }
+   },
+   "222832": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      207,
+      "upwind"
+     ],
+     [
+      207,
+      240,
+      "reach"
+     ],
+     [
+      240,
+      336,
+      "downwind"
+     ],
+     [
+      336,
+      458,
+      "upwind"
+     ],
+     [
+      458,
+      669,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 12,
+    "n_penalties": 0,
+    "name": "VARGAS SANC",
+    "rounds": [
+     1758287480,
+     1758287755,
+     1758288195,
+     1758288810,
+     1758289270
+    ],
+    "summary": {
+     "dist_nm": 3.74,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 2.16,
+     "n": 611,
+     "n_gybes": 5,
+     "n_legs": 5,
+     "n_tacks": 7,
+     "race_min": 46.58,
+     "sog_dn": 4.86,
+     "sog_mean": 4.81,
+     "sog_up": 4.46,
+     "tack_loss": 1.32,
+     "twa_dn": 163.0,
+     "twa_up": 45.0,
+     "vmg_dn": 4.17,
+     "vmg_up": 3.18
+    }
+   },
+   "223123": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      202,
+      "upwind"
+     ],
+     [
+      202,
+      232,
+      "reach"
+     ],
+     [
+      232,
+      325,
+      "downwind"
+     ],
+     [
+      325,
+      452,
+      "upwind"
+     ],
+     [
+      452,
+      663,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 13,
+    "n_penalties": 0,
+    "name": "CALDERON",
+    "rounds": [
+     1758287455,
+     1758287720,
+     1758288140,
+     1758288770,
+     1758289235
+    ],
+    "summary": {
+     "dist_nm": 3.71,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.53,
+     "n": 605,
+     "n_gybes": 6,
+     "n_legs": 5,
+     "n_tacks": 7,
+     "race_min": 46.58,
+     "sog_dn": 4.84,
+     "sog_mean": 4.72,
+     "sog_up": 4.41,
+     "tack_loss": 0.43,
+     "twa_dn": 162.0,
+     "twa_up": 44.0,
+     "vmg_dn": 4.0,
+     "vmg_up": 3.22
+    }
+   },
+   "223156": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      60,
+      189,
+      "upwind"
+     ],
+     [
+      189,
+      218,
+      "reach"
+     ],
+     [
+      218,
+      302,
+      "downwind"
+     ],
+     [
+      302,
+      423,
+      "upwind"
+     ],
+     [
+      423,
+      665,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 16,
+    "n_penalties": 0,
+    "name": "LUMBAT",
+    "rounds": [
+     1758287442,
+     1758287642,
+     1758288017,
+     1758288632,
+     1758289037
+    ],
+    "summary": {
+     "dist_nm": 3.85,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.48,
+     "n": 606,
+     "n_gybes": 8,
+     "n_legs": 5,
+     "n_tacks": 8,
+     "race_min": 44.32,
+     "sog_dn": 5.03,
+     "sog_mean": 4.91,
+     "sog_up": 4.53,
+     "tack_loss": 2.05,
+     "twa_dn": 159.0,
+     "twa_up": 44.0,
+     "vmg_dn": 4.27,
+     "vmg_up": 3.34
+    }
+   },
+   "223705": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      194,
+      "upwind"
+     ],
+     [
+      194,
+      220,
+      "reach"
+     ],
+     [
+      220,
+      307,
+      "downwind"
+     ],
+     [
+      307,
+      426,
+      "upwind"
+     ],
+     [
+      426,
+      661,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 16,
+    "n_penalties": 0,
+    "name": "GARCIA GARR",
+    "rounds": [
+     1758287455,
+     1758287665,
+     1758288045,
+     1758288615,
+     1758289070
+    ],
+    "summary": {
+     "dist_nm": 3.85,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 0.86,
+     "n": 603,
+     "n_gybes": 9,
+     "n_legs": 5,
+     "n_tacks": 7,
+     "race_min": 44.42,
+     "sog_dn": 4.97,
+     "sog_mean": 4.92,
+     "sog_up": 4.59,
+     "tack_loss": 1.19,
+     "twa_dn": 157.0,
+     "twa_up": 45.0,
+     "vmg_dn": 4.25,
+     "vmg_up": 3.3
+    }
+   },
+   "223872": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      60,
+      199,
+      "upwind"
+     ],
+     [
+      199,
+      231,
+      "reach"
+     ],
+     [
+      231,
+      323,
+      "downwind"
+     ],
+     [
+      323,
+      447,
+      "upwind"
+     ],
+     [
+      447,
+      669,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 12,
+    "n_penalties": 0,
+    "name": "MEDINA MARI",
+    "rounds": [
+     1758287497,
+     1758287717,
+     1758288112,
+     1758288712,
+     1758289182
+    ],
+    "summary": {
+     "dist_nm": 3.81,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 2.86,
+     "n": 610,
+     "n_gybes": 7,
+     "n_legs": 5,
+     "n_tacks": 5,
+     "race_min": 45.42,
+     "sog_dn": 5.25,
+     "sog_mean": 4.95,
+     "sog_up": 4.43,
+     "tack_loss": 1.68,
+     "twa_dn": 156.0,
+     "twa_up": 44.0,
+     "vmg_dn": 4.36,
+     "vmg_up": 3.15
+    }
+   },
+   "224023": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      60,
+      196,
+      "upwind"
+     ],
+     [
+      196,
+      236,
+      "reach"
+     ],
+     [
+      236,
+      328,
+      "downwind"
+     ],
+     [
+      328,
+      451,
+      "upwind"
+     ],
+     [
+      451,
+      662,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 17,
+    "n_penalties": 0,
+    "name": "MACIA PE_AL",
+    "rounds": [
+     1758287491,
+     1758287717,
+     1758288147,
+     1758288776,
+     1758289216
+    ],
+    "summary": {
+     "dist_nm": 3.76,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 0.31,
+     "n": 603,
+     "n_gybes": 9,
+     "n_legs": 5,
+     "n_tacks": 8,
+     "race_min": 46.27,
+     "sog_dn": 5.08,
+     "sog_mean": 4.85,
+     "sog_up": 4.43,
+     "tack_loss": 1.06,
+     "twa_dn": 158.0,
+     "twa_up": 41.0,
+     "vmg_dn": 4.22,
+     "vmg_up": 3.25
+    }
+   },
+   "224031": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      197,
+      "upwind"
+     ],
+     [
+      197,
+      223,
+      "reach"
+     ],
+     [
+      223,
+      313,
+      "downwind"
+     ],
+     [
+      313,
+      433,
+      "upwind"
+     ],
+     [
+      433,
+      669,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 18,
+    "n_penalties": 0,
+    "name": "ABELLA GARR",
+    "rounds": [
+     1758287462,
+     1758287673,
+     1758288068,
+     1758288683,
+     1758289098
+    ],
+    "summary": {
+     "dist_nm": 3.92,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.48,
+     "n": 611,
+     "n_gybes": 10,
+     "n_legs": 5,
+     "n_tacks": 8,
+     "race_min": 44.03,
+     "sog_dn": 5.17,
+     "sog_mean": 5.0,
+     "sog_up": 4.54,
+     "tack_loss": 0.46,
+     "twa_dn": 154.0,
+     "twa_up": 44.0,
+     "vmg_dn": 4.39,
+     "vmg_up": 3.28
+    }
+   },
+   "224034": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      204,
+      "upwind"
+     ],
+     [
+      204,
+      237,
+      "reach"
+     ],
+     [
+      237,
+      327,
+      "downwind"
+     ],
+     [
+      327,
+      452,
+      "upwind"
+     ],
+     [
+      452,
+      661,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 11,
+    "n_penalties": 0,
+    "name": "ABELLA GARR",
+    "rounds": [
+     1758287478,
+     1758287738,
+     1758288148,
+     1758288758,
+     1758289223
+    ],
+    "summary": {
+     "dist_nm": 3.78,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.53,
+     "n": 603,
+     "n_gybes": 4,
+     "n_legs": 5,
+     "n_tacks": 7,
+     "race_min": 46.45,
+     "sog_dn": 4.97,
+     "sog_mean": 4.85,
+     "sog_up": 4.53,
+     "tack_loss": 0.74,
+     "twa_dn": 162.0,
+     "twa_up": 46.0,
+     "vmg_dn": 4.31,
+     "vmg_up": 3.21
+    }
+   },
+   "224113": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      206,
+      "upwind"
+     ],
+     [
+      206,
+      245,
+      "reach"
+     ],
+     [
+      245,
+      344,
+      "downwind"
+     ],
+     [
+      344,
+      476,
+      "upwind"
+     ],
+     [
+      476,
+      662,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 10,
+    "n_penalties": 0,
+    "name": "PEREZ CAYUE",
+    "rounds": [
+     1758287544,
+     1758287773,
+     1758288233,
+     1758288904,
+     1758289374
+    ],
+    "summary": {
+     "dist_nm": 3.63,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 0.57,
+     "n": 604,
+     "n_gybes": 4,
+     "n_legs": 5,
+     "n_tacks": 6,
+     "race_min": 46.57,
+     "sog_dn": 4.92,
+     "sog_mean": 4.69,
+     "sog_up": 4.26,
+     "tack_loss": 1.96,
+     "twa_dn": 162.0,
+     "twa_up": 43.0,
+     "vmg_dn": 4.03,
+     "vmg_up": 3.01
+    }
+   },
+   "224316": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      60,
+      198,
+      "upwind"
+     ],
+     [
+      198,
+      226,
+      "reach"
+     ],
+     [
+      226,
+      319,
+      "downwind"
+     ],
+     [
+      319,
+      443,
+      "upwind"
+     ],
+     [
+      443,
+      664,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 17,
+    "n_penalties": 0,
+    "name": "FONT REYERO",
+    "rounds": [
+     1758287451,
+     1758287690,
+     1758288091,
+     1758288751,
+     1758289215
+    ],
+    "summary": {
+     "dist_nm": 3.85,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 2.83,
+     "n": 605,
+     "n_gybes": 10,
+     "n_legs": 5,
+     "n_tacks": 7,
+     "race_min": 45.9,
+     "sog_dn": 5.02,
+     "sog_mean": 4.96,
+     "sog_up": 4.64,
+     "tack_loss": 1.18,
+     "twa_dn": 163.0,
+     "twa_up": 46.0,
+     "vmg_dn": 4.3,
+     "vmg_up": 3.16
+    }
+   },
+   "224683": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      203,
+      "upwind"
+     ],
+     [
+      203,
+      242,
+      "reach"
+     ],
+     [
+      242,
+      332,
+      "downwind"
+     ],
+     [
+      332,
+      459,
+      "upwind"
+     ],
+     [
+      459,
+      661,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 13,
+    "n_penalties": 0,
+    "name": "COCHRANE",
+    "rounds": [
+     1758287515,
+     1758287760,
+     1758288160,
+     1758288780,
+     1758289265
+    ],
+    "summary": {
+     "dist_nm": 3.69,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.44,
+     "n": 603,
+     "n_gybes": 8,
+     "n_legs": 5,
+     "n_tacks": 5,
+     "race_min": 46.57,
+     "sog_dn": 4.98,
+     "sog_mean": 4.76,
+     "sog_up": 4.35,
+     "tack_loss": 1.19,
+     "twa_dn": 165.0,
+     "twa_up": 45.0,
+     "vmg_dn": 4.24,
+     "vmg_up": 3.07
+    }
+   },
+   "224816": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      198,
+      "upwind"
+     ],
+     [
+      198,
+      237,
+      "reach"
+     ],
+     [
+      237,
+      323,
+      "downwind"
+     ],
+     [
+      323,
+      445,
+      "upwind"
+     ],
+     [
+      445,
+      668,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 15,
+    "n_penalties": 0,
+    "name": "FERRER HOMS",
+    "rounds": [
+     1758287490,
+     1758287735,
+     1758288129,
+     1758288755,
+     1758289175
+    ],
+    "summary": {
+     "dist_nm": 3.89,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.04,
+     "n": 610,
+     "n_gybes": 7,
+     "n_legs": 5,
+     "n_tacks": 8,
+     "race_min": 45.02,
+     "sog_dn": 5.39,
+     "sog_mean": 5.03,
+     "sog_up": 4.5,
+     "tack_loss": 1.38,
+     "twa_dn": 153.0,
+     "twa_up": 44.0,
+     "vmg_dn": 4.52,
+     "vmg_up": 3.22
+    }
+   },
+   "225658": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      196,
+      "upwind"
+     ],
+     [
+      196,
+      228,
+      "reach"
+     ],
+     [
+      228,
+      318,
+      "downwind"
+     ],
+     [
+      318,
+      444,
+      "upwind"
+     ],
+     [
+      444,
+      661,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 21,
+    "n_penalties": 0,
+    "name": "DENGRA ESPL",
+    "rounds": [
+     1758287484,
+     1758287703,
+     1758288093,
+     1758288759,
+     1758289224
+    ],
+    "summary": {
+     "dist_nm": 3.73,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 2.59,
+     "n": 603,
+     "n_gybes": 14,
+     "n_legs": 5,
+     "n_tacks": 7,
+     "race_min": 46.35,
+     "sog_dn": 4.96,
+     "sog_mean": 4.78,
+     "sog_up": 4.35,
+     "tack_loss": 0.4,
+     "twa_dn": 163.0,
+     "twa_up": 42.0,
+     "vmg_dn": 4.22,
+     "vmg_up": 3.18
+    }
+   },
+   "225749": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      59,
+      194,
+      "upwind"
+     ],
+     [
+      194,
+      224,
+      "reach"
+     ],
+     [
+      224,
+      315,
+      "downwind"
+     ],
+     [
+      315,
+      437,
+      "upwind"
+     ],
+     [
+      437,
+      668,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 16,
+    "n_penalties": 0,
+    "name": "AGUILAR",
+    "rounds": [
+     1758287468,
+     1758287673,
+     1758288079,
+     1758288724,
+     1758289149
+    ],
+    "summary": {
+     "dist_nm": 3.68,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.44,
+     "n": 610,
+     "n_gybes": 8,
+     "n_legs": 5,
+     "n_tacks": 8,
+     "race_min": 46.55,
+     "sog_dn": 4.28,
+     "sog_mean": 4.59,
+     "sog_up": 4.66,
+     "tack_loss": 1.72,
+     "twa_dn": 162.0,
+     "twa_up": 46.0,
+     "vmg_dn": 3.64,
+     "vmg_up": 3.24
+    }
+   },
+   "226538": {
+    "course_ix": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "legs": [
+     [
+      60,
+      197,
+      "upwind"
+     ],
+     [
+      197,
+      227,
+      "reach"
+     ],
+     [
+      227,
+      316,
+      "downwind"
+     ],
+     [
+      316,
+      436,
+      "upwind"
+     ],
+     [
+      436,
+      663,
+      "downwind"
+     ]
+    ],
+    "n_maneuvers": 12,
+    "n_penalties": 0,
+    "name": "KRUPSKI TET",
+    "rounds": [
+     1758287451,
+     1758287691,
+     1758288081,
+     1758288696,
+     1758289121
+    ],
+    "summary": {
+     "dist_nm": 3.9,
+     "finished": true,
+     "gps_finish": false,
+     "gybe_loss": 1.88,
+     "n": 604,
+     "n_gybes": 5,
+     "n_legs": 5,
+     "n_tacks": 7,
+     "race_min": 44.42,
+     "sog_dn": 5.26,
+     "sog_mean": 5.0,
+     "sog_up": 4.52,
+     "tack_loss": 1.67,
+     "twa_dn": 151.0,
+     "twa_up": 44.0,
+     "vmg_dn": 4.36,
+     "vmg_up": 3.26
+    }
+   }
+  },
+  "marks": [
+   {
+    "label": "1",
+    "ll": [
+     38.58823,
+     -0.022345
+    ]
+   },
+   {
+    "label": "2",
+    "ll": [
+     38.5941895,
+     -0.021968500000000002
+    ]
+   },
+   {
+    "label": "G",
+    "ll": [
+     38.596411,
+     -0.033431
+    ]
+   },
+   {
+    "label": "G",
+    "ll": [
+     38.596101000000004,
+     -0.0334165
+    ]
+   },
+   {
+    "label": "F",
+    "ll": [
+     38.590141,
+     -0.041431
+    ]
+   },
+   {
+    "label": "RC",
+    "ll": [
+     38.5888524941987,
+     -0.03495215925419293
+    ]
+   },
+   {
+    "label": "Pin",
+    "ll": [
+     38.590608614420724,
+     -0.03463638707539222
+    ]
+   }
+  ],
+  "meta": {
+   "course": [
+    {
+     "gate": false,
+     "mark": "1",
+     "type": "U"
+    },
+    {
+     "gate": false,
+     "mark": "2",
+     "type": "R"
+    },
+    {
+     "gate": true,
+     "mark": "G",
+     "type": "D"
+    },
+    {
+     "gate": false,
+     "mark": "2",
+     "type": "U"
+    },
+    {
+     "gate": true,
+     "mark": "G",
+     "type": "D"
+    },
+    {
+     "gate": false,
+     "mark": "F",
+     "type": "R"
+    }
+   ],
+   "gun_manual": false,
+   "gun_t": 1758286800.0,
+   "key": "Prueba 3",
+   "lat0": 38.59296719648619,
+   "lon0": -0.029968683680015297,
+   "race": "Prueba 3",
+   "start_iso": "2025-09-19T13:00:00+00:00",
+   "start_t": 1758286800.0,
+   "wind_from": 98.0
+  },
+  "order": [
+   "165434",
+   "196717",
+   "206341",
+   "206433",
+   "211115",
+   "211436",
+   "212354",
+   "212517",
+   "214487",
+   "215314",
+   "216095",
+   "216185",
+   "216441",
+   "217170",
+   "217175",
+   "217181",
+   "217196",
+   "217328",
+   "217999",
+   "218003",
+   "218493",
+   "218918",
+   "219493",
+   "220035",
+   "220172",
+   "220377",
+   "220637",
+   "221172",
+   "221275",
+   "221281",
+   "221326",
+   "221378",
+   "221425",
+   "222666",
+   "222832",
+   "223123",
+   "223156",
+   "223705",
+   "223872",
+   "224023",
+   "224031",
+   "224034",
+   "224113",
+   "224316",
+   "224683",
+   "224816",
+   "225658",
+   "225749",
+   "226538"
+  ],
+  "start_line": [
+   [
+    38.590608614420724,
+    -0.03463638707539222
+   ],
+   [
+    38.5888524941987,
+    -0.03495215925419293
+   ]
+  ]
+ }
+}

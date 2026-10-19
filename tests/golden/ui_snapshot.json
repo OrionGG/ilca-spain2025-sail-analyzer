@@ -1,0 +1,427 @@
+{
+ "app": "sail-analyzer-ui-snapshot",
+ "version": 3,
+ "focus": "206341",
+ "handPlacedMarks": 0,
+ "setup": {
+  "Prueba 1": {
+   "course": "U:1 R:2 D:G* U:2 D:G* R:F",
+   "gun": null
+  },
+  "Prueba 2": {
+   "course": "U:1 R:2a D:G* U:2b D:G* R:F",
+   "gun": null
+  },
+  "Prueba 3": {
+   "course": "U:1 R:2 D:G* U:2 D:G* R:F",
+   "gun": null
+  },
+  "Prueba 4": {
+   "course": "U:1 R:2 D:G* U:2 D:G* R:F",
+   "gun": null
+  },
+  "Prueba 5": {
+   "course": "U:1 R:2a D:G* U:2b D:G* R:F",
+   "gun": null
+  },
+  "Prueba 6": {
+   "course": "U:1 R:2 D:G* U:2 D:G* R:F",
+   "gun": null
+  },
+  "Prueba 7": {
+   "course": "U:1 R:2 D:G* U:2 D:G* R:F",
+   "gun": null
+  },
+  "Prueba 8": {
+   "course": "U:1 R:2 D:G* U:2 D:G* R:F",
+   "gun": null
+  },
+  "Prueba 9": {
+   "course": "U:1 R:2 D:G* U:2 D:G* R:F",
+   "gun": null
+  }
+ },
+ "tabs": [
+  "overview",
+  "debrief",
+  "speed",
+  "vmg",
+  "wind",
+  "maneuvers",
+  "start",
+  "position",
+  "regatta"
+ ],
+ "races": [
+  {
+   "race": "Prueba 1",
+   "tabs": {
+    "overview": {
+     "h": "b1fcf57a0347db936418",
+     "n": 1404
+    },
+    "debrief": {
+     "h": "e22ef1f6ac2645b89698",
+     "n": 5747
+    },
+    "speed": {
+     "h": "fd69b9b6e919aa46b790",
+     "n": 375
+    },
+    "vmg": {
+     "h": "56aa3b25bca57a944dcc",
+     "n": 303
+    },
+    "wind": {
+     "h": "99ba9cd84e502c42d4f9",
+     "n": 603
+    },
+    "maneuvers": {
+     "h": "c1bba46a9c0538b4d825",
+     "n": 2349
+    },
+    "start": {
+     "h": "86579cc533bb25cec2f0",
+     "n": 518
+    },
+    "position": {
+     "h": "d3e5d17bf641e18c9c32",
+     "n": 1332
+    },
+    "regatta": {
+     "h": "230efefbd2e05707975b",
+     "n": 5033
+    }
+   }
+  },
+  {
+   "race": "Prueba 2",
+   "tabs": {
+    "overview": {
+     "h": "33cd319d60100fd53c9c",
+     "n": 1427
+    },
+    "debrief": {
+     "h": "98313928434671b5a365",
+     "n": 5723
+    },
+    "speed": {
+     "h": "72fb28ba4bd4376ef67c",
+     "n": 375
+    },
+    "vmg": {
+     "h": "56aa3b25bca57a944dcc",
+     "n": 303
+    },
+    "wind": {
+     "h": "278682209a795adc8905",
+     "n": 604
+    },
+    "maneuvers": {
+     "h": "28d623a20197d98bd10d",
+     "n": 1193
+    },
+    "start": {
+     "h": "3d5a878629a58583dba2",
+     "n": 518
+    },
+    "position": {
+     "h": "0d7c23f525d98dbd7c66",
+     "n": 1325
+    },
+    "regatta": {
+     "h": "230efefbd2e05707975b",
+     "n": 5033
+    }
+   }
+  },
+  {
+   "race": "Prueba 3",
+   "tabs": {
+    "overview": {
+     "h": "0b21051fa4e264102d96",
+     "n": 1441
+    },
+    "debrief": {
+     "h": "d615a45ce327cab1d7e1",
+     "n": 5510
+    },
+    "speed": {
+     "h": "842a9e050b1ab06605ab",
+     "n": 351
+    },
+    "vmg": {
+     "h": "56aa3b25bca57a944dcc",
+     "n": 303
+    },
+    "wind": {
+     "h": "ac76f060e5588aeebae1",
+     "n": 602
+    },
+    "maneuvers": {
+     "h": "640b5c5ba8ba45005cb1",
+     "n": 1549
+    },
+    "start": {
+     "h": "3eeb8b93718c3d898eb7",
+     "n": 518
+    },
+    "position": {
+     "h": "da3c45ff53c3d4bcf719",
+     "n": 1324
+    },
+    "regatta": {
+     "h": "230efefbd2e05707975b",
+     "n": 5033
+    }
+   }
+  },
+  {
+   "race": "Prueba 4",
+   "tabs": {
+    "overview": {
+     "h": "c2cc2aa12afd3c6b3851",
+     "n": 1469
+    },
+    "debrief": {
+     "h": "df1f1b531acf743d9194",
+     "n": 5939
+    },
+    "speed": {
+     "h": "2dc2615a181484d73742",
+     "n": 375
+    },
+    "vmg": {
+     "h": "56aa3b25bca57a944dcc",
+     "n": 303
+    },
+    "wind": {
+     "h": "d7c0b6cc6255fde898e9",
+     "n": 603
+    },
+    "maneuvers": {
+     "h": "a16ea754595c1f50317e",
+     "n": 1502
+    },
+    "start": {
+     "h": "96d9307708e3e8ce51c0",
+     "n": 518
+    },
+    "position": {
+     "h": "a80cd502b3a802e2d156",
+     "n": 1336
+    },
+    "regatta": {
+     "h": "230efefbd2e05707975b",
+     "n": 5033
+    }
+   }
+  },
+  {
+   "race": "Prueba 5",
+   "tabs": {
+    "overview": {
+     "h": "42013b13498fa3e27ad4",
+     "n": 1424
+    },
+    "debrief": {
+     "h": "af0bed26e702b266b0f4",
+     "n": 5399
+    },
+    "speed": {
+     "h": "7f3127ebbacde371d7ff",
+     "n": 375
+    },
+    "vmg": {
+     "h": "56aa3b25bca57a944dcc",
+     "n": 303
+    },
+    "wind": {
+     "h": "a9b43f08f3735c214617",
+     "n": 603
+    },
+    "maneuvers": {
+     "h": "1b749c8035df6e20d4e6",
+     "n": 1690
+    },
+    "start": {
+     "h": "f9f4cfc7a8d4221703c4",
+     "n": 518
+    },
+    "position": {
+     "h": "fd12b8aac4f6b7836547",
+     "n": 1327
+    },
+    "regatta": {
+     "h": "230efefbd2e05707975b",
+     "n": 5033
+    }
+   }
+  },
+  {
+   "race": "Prueba 6",
+   "tabs": {
+    "overview": {
+     "h": "89be564dfc292ee400cc",
+     "n": 1450
+    },
+    "debrief": {
+     "h": "30b20fa7a4cf4fa6df5c",
+     "n": 5294
+    },
+    "speed": {
+     "h": "4a27515ce0ff5f352d3e",
+     "n": 351
+    },
+    "vmg": {
+     "h": "56aa3b25bca57a944dcc",
+     "n": 303
+    },
+    "wind": {
+     "h": "310c02baf7a2e143c116",
+     "n": 602
+    },
+    "maneuvers": {
+     "h": "765faeebcd98282b071f",
+     "n": 2011
+    },
+    "start": {
+     "h": "80f84438f23bea8da9cd",
+     "n": 517
+    },
+    "position": {
+     "h": "8b88645c14df8b3987db",
+     "n": 1327
+    },
+    "regatta": {
+     "h": "230efefbd2e05707975b",
+     "n": 5033
+    }
+   }
+  },
+  {
+   "race": "Prueba 7",
+   "tabs": {
+    "overview": {
+     "h": "506ca6f51aef4ffa8666",
+     "n": 1447
+    },
+    "debrief": {
+     "h": "a896d6e93a339918aa1e",
+     "n": 5468
+    },
+    "speed": {
+     "h": "3727d3a101161428a204",
+     "n": 375
+    },
+    "vmg": {
+     "h": "56aa3b25bca57a944dcc",
+     "n": 303
+    },
+    "wind": {
+     "h": "d9920828adde6d522c94",
+     "n": 603
+    },
+    "maneuvers": {
+     "h": "2ddc77634e1215aa2a7c",
+     "n": 2058
+    },
+    "start": {
+     "h": "ba6117ec027380585955",
+     "n": 519
+    },
+    "position": {
+     "h": "60d34fa4657c94f7edcf",
+     "n": 1333
+    },
+    "regatta": {
+     "h": "230efefbd2e05707975b",
+     "n": 5033
+    }
+   }
+  },
+  {
+   "race": "Prueba 8",
+   "tabs": {
+    "overview": {
+     "h": "921e60536205808872ae",
+     "n": 1453
+    },
+    "debrief": {
+     "h": "e288dcf81da0483cb3bc",
+     "n": 5479
+    },
+    "speed": {
+     "h": "c5e7f5eae9db06f46b02",
+     "n": 375
+    },
+    "vmg": {
+     "h": "56aa3b25bca57a944dcc",
+     "n": 303
+    },
+    "wind": {
+     "h": "6cabb262e382530a65e8",
+     "n": 603
+    },
+    "maneuvers": {
+     "h": "6df363651972e8e50cde",
+     "n": 2271
+    },
+    "start": {
+     "h": "aefbcbbba08792c8f52d",
+     "n": 519
+    },
+    "position": {
+     "h": "18bfd11aa804d228a99a",
+     "n": 1332
+    },
+    "regatta": {
+     "h": "230efefbd2e05707975b",
+     "n": 5033
+    }
+   }
+  },
+  {
+   "race": "Prueba 9",
+   "tabs": {
+    "overview": {
+     "h": "a223bd86cce063823c6e",
+     "n": 1395
+    },
+    "debrief": {
+     "h": "720e435084ed9fc49124",
+     "n": 5064
+    },
+    "speed": {
+     "h": "97dedc06a7cd1c26a980",
+     "n": 375
+    },
+    "vmg": {
+     "h": "56aa3b25bca57a944dcc",
+     "n": 303
+    },
+    "wind": {
+     "h": "75e9c7947350e4a83a5c",
+     "n": 603
+    },
+    "maneuvers": {
+     "h": "07c3230d1592ada8d7f2",
+     "n": 1879
+    },
+    "start": {
+     "h": "77cfe99ec710e41cbe5d",
+     "n": 519
+    },
+    "position": {
+     "h": "a1e059a295f1c0391018",
+     "n": 1344
+    },
+    "regatta": {
+     "h": "230efefbd2e05707975b",
+     "n": 5033
+    }
+   }
+  }
+ ],
+ "note": "Reference rendered from main 0e4f046 on the copa2025 regatta in its seeded setup (see 'setup'), official results downloaded (date masked), focus 206341, no compare boat, no hand-placed marks. See tests/README.md."
+}
