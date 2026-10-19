@@ -30,11 +30,15 @@ async function uiSnapshot(opt = {}) {
     }
     throw new Error('page did not settle');
   };
+  // set a selector; when that triggers a redraw, wait for the redraw itself (a marker in
+  // #tabbody that the page's own render replaces), not just for the text to stand still
   const pick = async (sel, value, force) => {
     const el = $(sel);
     if (el.value === String(value) && !force) return;
+    $('#tabbody').innerHTML = '<i data-snapshot-wait></i>';
     el.value = String(value);
     el.dispatchEvent(new Event('change'));
+    await settle(() => el.value === String(value) && !$('#tabbody [data-snapshot-wait]'));
   };
   // hand-placed marks live in localStorage ("sa_marks_<race key>") and change every tab
   const handPlaced = (() => {
@@ -47,11 +51,8 @@ async function uiSnapshot(opt = {}) {
   const out = { app: 'sail-analyzer-ui-snapshot', version: 2, focus: FOCUS, handPlacedMarks: handPlaced, tabs, races: [] };
   for (const r of races) {
     if (opt.races && !opt.races.includes(r.name)) continue;
-    // (re)load every race, even the one shown, so no earlier state (e.g. a leg filter) carries
-    // over; the loaded race re-renders the tab body: wait for that, not just for the select
-    $('#tabbody').innerHTML = '<i data-snapshot-wait></i>';
+    // (re)load every race, even the one shown, so no earlier state (e.g. a leg filter) carries over
     await pick('#raceSel', r.value, true);
-    await settle(() => raceSel.value === r.value && !$('#tabbody [data-snapshot-wait]'));
     if (![...$('#focusSel').options].some(o => o.value === FOCUS))
       throw new Error(`${r.name}: focus boat ${FOCUS} is not in this race`);
     await pick('#focusSel', FOCUS);

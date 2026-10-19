@@ -153,7 +153,9 @@ class Api(unittest.TestCase):
 
         # update: a name only keeps the analysis; a new course re-analyses with a new marks key
         self.json(f"/api/regatta/{rid}/race/{race_id}/update", {"name": "Race B", "course": TRAP, "gun": None})
-        self.assertEqual(self.json(f"/api/race/{rid}/{race_id}")["race"], "Race B")
+        renamed = self.json(f"/api/race/{rid}/{race_id}")
+        self.assertEqual((renamed["race"], renamed["key"]), ("Race B", key))      # hand-placed marks still apply
+        self.assertEqual(renamed["boats"], data["boats"])                          # not re-analysed
         wing = A.template_course("trap_outer_wing")
         self.json(f"/api/regatta/{rid}/race/{race_id}/update", {"name": "Race B", "course": wing, "gun": None})
         data = self.json(f"/api/race/{rid}/{race_id}")
