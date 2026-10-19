@@ -42,8 +42,14 @@ async function uiSnapshot(opt = {}) {
   const out = { app: 'sail-analyzer-ui-snapshot', version: 1, focus: FOCUS, tabs, races: [] };
   for (const r of races) {
     if (opt.races && !opt.races.includes(r.name)) continue;
-    await pick('#raceSel', r.value);
-    await settle(() => raceSel.value === r.value && [...$('#focusSel').options].length > 0);
+    if (raceSel.value !== r.value) {
+      // the loaded race re-renders the tab body: wait for that, not just for the select
+      $('#tabbody').innerHTML = '<i data-snapshot-wait></i>';
+      await pick('#raceSel', r.value);
+      await settle(() => raceSel.value === r.value && !$('#tabbody [data-snapshot-wait]'));
+    }
+    if (![...$('#focusSel').options].some(o => o.value === FOCUS))
+      throw new Error(`${r.name}: focus boat ${FOCUS} is not in this race`);
     await pick('#focusSel', FOCUS);
     await pick('#partnerSel', '');
     const row = { race: r.name, manualMarks: $('#resetOrigBtn') ? $('#resetOrigBtn').style.display !== 'none' : null, tabs: {} };

@@ -13,7 +13,7 @@ import unittest
 import urllib.error
 import urllib.request
 
-import support
+from tests import support
 import app as A
 
 RACE1 = os.path.join(support.ROOT, "01_Prueba 1")

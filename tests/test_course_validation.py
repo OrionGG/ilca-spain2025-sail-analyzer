@@ -2,7 +2,7 @@
 
 import unittest
 
-import support  # noqa: F401
+from tests import support  # noqa: F401
 import app as A
 
 

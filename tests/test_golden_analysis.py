@@ -11,6 +11,7 @@ Regenerate the references after an intended change (say why in the PR):
     python tests/test_golden_analysis.py --update
 """
 
+import glob
 import hashlib
 import json
 import math
@@ -18,7 +19,10 @@ import os
 import sys
 import unittest
 
-import support
+try:
+    from tests import support
+except ImportError:          # run as a script: python tests/test_golden_analysis.py --update
+    import support
 import app as A
 
 DIR = os.path.join(support.GOLDEN, "analysis")
@@ -47,7 +51,8 @@ def snapshot(i, race, d):
                 "wind_series": sha(d["wind_series"]), "fleet_stats": sha(d["fleet_stats"]),
                 "index_entry": sha(A.index_entry(i, race["id"], d))}
     sections.update({"boat " + b["sail"]: sha(b) for b in d["boats"]})
-    return {"summary": {"meta": meta, "marks": d["marks"], "start_line": d["start_line"], "boats": boats},
+    return {"summary": {"meta": meta, "marks": d["marks"], "start_line": d["start_line"], "boats": boats,
+                        "order": [b["sail"] for b in d["boats"]]},
             "sections": sections}
 
 
@@ -82,6 +87,15 @@ def golden_path(race):
 
 @unittest.skipIf(os.environ.get("SAIL_GOLDEN") == "0", "SAIL_GOLDEN=0")
 class GoldenAnalysis(unittest.TestCase):
+    def test_same_races(self):
+        """Every reference is checked: the races found are exactly those with a reference."""
+        found = {r["id"]: r["name"] for r in races()}
+        refs = {}
+        for path in sorted(glob.glob(os.path.join(DIR, "*.json"))):
+            with open(path, encoding="utf-8") as fh:
+                refs[os.path.basename(path)[:-5]] = json.load(fh)["summary"]["meta"]["race"]
+        self.assertEqual(found, refs)
+
     def test_copa_races(self):
         for i, race in enumerate(races()):
             with self.subTest(race=race["name"]):
@@ -97,6 +111,8 @@ class GoldenAnalysis(unittest.TestCase):
 
 def update():
     os.makedirs(DIR, exist_ok=True)
+    for path in glob.glob(os.path.join(DIR, "*.json")):          # no stale references left
+        os.remove(path)
     for i, race in enumerate(races()):
         with open(golden_path(race), "w", encoding="utf-8", newline="\n") as fh:
             json.dump(snapshot(i, race, build(race)), fh, indent=1, sort_keys=True)

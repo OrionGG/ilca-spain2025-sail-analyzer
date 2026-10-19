@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-import support  # noqa: F401
+from tests import support  # noqa: F401
 import regatta as R
 
 

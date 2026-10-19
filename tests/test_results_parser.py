@@ -3,7 +3,7 @@
 import http.client
 import unittest
 
-import support  # noqa: F401  (puts the app's modules on sys.path)
+from tests import support  # noqa: F401  (puts the app's modules on sys.path)
 import results as RS
 
 
