@@ -3,8 +3,8 @@
 // It drives the page only through its DOM (race / focus / compare selectors, tab buttons,
 // #tabbody), so it keeps working while the scripts behind the page are restructured.
 // The page contract it relies on: #regSel, #raceSel, #focusSel, #partnerSel,
-// #tabs button[data-tab], #tabbody, and hand-placed marks stored in localStorage as
-// "sa_marks_<race key>".
+// #tabs button[data-tab], #tabbody; hand-placed marks stored in localStorage as
+// "sa_marks_<race key>", with the key from GET /api/race/<regatta>/<race>.
 //
 // Use (see tests/README.md): open the app on the copa2025 regatta, paste this file into the
 // browser console (or run it through a browser tool), then
@@ -45,14 +45,20 @@ async function uiSnapshot(opt = {}) {
   };
   const raceSel = $('#raceSel');
   const races = [...raceSel.options].map(o => ({ value: o.value, name: o.textContent.split('·')[0].trim() }));
-  // hand-placed marks live in localStorage as "sa_marks_<race key>" and change every tab; this
-  // regatta's keys are "<regatta id>/<race id>/<…>" (races added in the app) or the race name
-  // (the repo's own races), so marks kept for other regattas don't count
-  const handPlaced = (() => {
-    const rid = $('#regSel') ? $('#regSel').value : '', names = new Set(races.map(r => r.name));
+  // hand-placed marks live in localStorage as "sa_marks_<race key>" and change every tab: look up
+  // each race's current key (GET /api/race/<regatta>/<race> returns it), so marks kept for other
+  // regattas or left over from an old course don't count; null = could not check
+  const handPlaced = await (async () => {
     try {
-      return Object.keys(localStorage).filter(k => k.startsWith('sa_marks_') && localStorage.getItem(k))
-        .map(k => k.slice('sa_marks_'.length)).filter(k => k.startsWith(rid + '/') || names.has(k)).length;
+      const rid = $('#regSel').value;
+      const idx = await (await fetch(`/api/index/${rid}`)).json();
+      let n = 0;
+      for (const e of idx) {
+        const race = await (await fetch(`/api/race/${rid}/${e.id}`)).json();
+        if (!race.key) return null;
+        if (localStorage.getItem('sa_marks_' + race.key)) n++;
+      }
+      return n;
     } catch (e) { return null; }
   })();
   const tabs = [...document.querySelectorAll('#tabs button[data-tab]')].map(b => b.dataset.tab);
@@ -80,7 +86,10 @@ async function uiSnapshot(opt = {}) {
 
 function uiCompare(ref, cur) {
   const diffs = [];
-  if (cur.handPlacedMarks) diffs.push(`${cur.handPlacedMarks} race(s) have hand-placed marks — reset them (Edit marks → Reset: original) before comparing`);
+  if (cur.handPlacedMarks === null || cur.handPlacedMarks === undefined)
+    diffs.push('could not check for hand-placed marks (localStorage or the API unavailable)');
+  else if (cur.handPlacedMarks)
+    diffs.push(`${cur.handPlacedMarks} race(s) have hand-placed marks — reset them (Edit marks → Reset: original) before comparing`);
   if (ref.focus !== cur.focus) diffs.push(`focus ${ref.focus} -> ${cur.focus}`);
   if (String(ref.tabs) !== String(cur.tabs)) diffs.push(`tabs ${ref.tabs} -> ${cur.tabs}`);
   const byName = Object.fromEntries(cur.races.map(r => [r.race, r]));

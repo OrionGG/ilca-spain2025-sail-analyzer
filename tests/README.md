@@ -39,12 +39,14 @@ Copa race, for focus boat 206341 with no compare boat.
 The script drives the page only through its DOM, so it keeps working while the scripts behind
 the page are restructured. It relies on this page contract: `#regSel`, `#raceSel`,
 `#focusSel`, `#partnerSel`, `#tabs button[data-tab]`, `#tabbody`, and hand-placed marks stored in
-localStorage as `sa_marks_<race key>`.
+localStorage as `sa_marks_<race key>`, with each race's current key taken from
+`GET /api/race/<regatta>/<race>`.
 
 - It reloads every race, so earlier UI state such as a leg filter doesn't carry over.
 - It fails if the focus boat isn't in a race.
 - It masks the official results' download date, so re-downloading them doesn't change the snapshot.
-- It counts hand-placed marks only for the regatta shown.
+- It counts hand-placed marks only for the races being snapshotted, under each race's current
+  key. Marks of other regattas or left over from an old course don't count.
 
 1. Start the verify server: `python sail_analyzer/app.py --port 8771` (or the `sail-verify`
    launch config).
