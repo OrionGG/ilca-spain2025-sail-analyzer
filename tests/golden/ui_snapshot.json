@@ -51,8 +51,8 @@
      "n": 1332
     },
     "regatta": {
-     "h": "5f6dbb3663f2ed275623",
-     "n": 5037
+     "h": "230efefbd2e05707975b",
+     "n": 5033
     }
    }
   },
@@ -92,8 +92,8 @@
      "n": 1325
     },
     "regatta": {
-     "h": "5f6dbb3663f2ed275623",
-     "n": 5037
+     "h": "230efefbd2e05707975b",
+     "n": 5033
     }
    }
   },
@@ -133,8 +133,8 @@
      "n": 1324
     },
     "regatta": {
-     "h": "5f6dbb3663f2ed275623",
-     "n": 5037
+     "h": "230efefbd2e05707975b",
+     "n": 5033
     }
    }
   },
@@ -174,8 +174,8 @@
      "n": 1336
     },
     "regatta": {
-     "h": "5f6dbb3663f2ed275623",
-     "n": 5037
+     "h": "230efefbd2e05707975b",
+     "n": 5033
     }
    }
   },
@@ -215,8 +215,8 @@
      "n": 1327
     },
     "regatta": {
-     "h": "5f6dbb3663f2ed275623",
-     "n": 5037
+     "h": "230efefbd2e05707975b",
+     "n": 5033
     }
    }
   },
@@ -256,8 +256,8 @@
      "n": 1327
     },
     "regatta": {
-     "h": "5f6dbb3663f2ed275623",
-     "n": 5037
+     "h": "230efefbd2e05707975b",
+     "n": 5033
     }
    }
   },
@@ -297,8 +297,8 @@
      "n": 1333
     },
     "regatta": {
-     "h": "5f6dbb3663f2ed275623",
-     "n": 5037
+     "h": "230efefbd2e05707975b",
+     "n": 5033
     }
    }
   },
@@ -338,8 +338,8 @@
      "n": 1332
     },
     "regatta": {
-     "h": "5f6dbb3663f2ed275623",
-     "n": 5037
+     "h": "230efefbd2e05707975b",
+     "n": 5033
     }
    }
   },
@@ -379,11 +379,11 @@
      "n": 1344
     },
     "regatta": {
-     "h": "5f6dbb3663f2ed275623",
-     "n": 5037
+     "h": "230efefbd2e05707975b",
+     "n": 5033
     }
    }
   }
  ],
- "note": "Reference rendered from main 0e4f046 on the copa2025 regatta with the official results downloaded, focus 206341, no compare boat, no hand-placed marks. See tests/README.md."
+ "note": "Reference rendered from main 0e4f046 on the copa2025 regatta with the official results downloaded (date masked), focus 206341, no compare boat, no hand-placed marks. See tests/README.md."
 }

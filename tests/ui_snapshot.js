@@ -2,8 +2,9 @@
 //
 // It drives the page only through its DOM (race / focus / compare selectors, tab buttons,
 // #tabbody), so it keeps working while the scripts behind the page are restructured.
-// The page contract it relies on: #raceSel, #focusSel, #partnerSel, #tabs button[data-tab],
-// #tabbody, and hand-placed marks stored in localStorage as "sa_marks_<race key>".
+// The page contract it relies on: #regSel, #raceSel, #focusSel, #partnerSel,
+// #tabs button[data-tab], #tabbody, and hand-placed marks stored in localStorage as
+// "sa_marks_<race key>".
 //
 // Use (see tests/README.md): open the app on the copa2025 regatta, paste this file into the
 // browser console (or run it through a browser tool), then
@@ -15,7 +16,9 @@ async function uiSnapshot(opt = {}) {
   const FOCUS = opt.focus || '206341';
   const $ = s => document.querySelector(s);
   const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const norm = s => (s || '').replace(/\s+/g, ' ').trim();
+  // whitespace collapsed; the official results' download date masked (it changes when re-downloaded;
+  // innerText follows the CSS, so the section title reads "DOWNLOADED …")
+  const norm = s => (s || '').replace(/\s+/g, ' ').trim().replace(/downloaded \d{4}-\d{2}-\d{2}/gi, 'downloaded <date>');
   const hash = async s => {
     const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
     return [...new Uint8Array(d)].slice(0, 10).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -40,13 +43,18 @@ async function uiSnapshot(opt = {}) {
     el.dispatchEvent(new Event('change'));
     await settle(() => el.value === String(value) && !$('#tabbody [data-snapshot-wait]'));
   };
-  // hand-placed marks live in localStorage ("sa_marks_<race key>") and change every tab
-  const handPlaced = (() => {
-    try { return Object.keys(localStorage).filter(k => k.startsWith('sa_marks_') && localStorage.getItem(k)).length; }
-    catch (e) { return null; }
-  })();
   const raceSel = $('#raceSel');
   const races = [...raceSel.options].map(o => ({ value: o.value, name: o.textContent.split('·')[0].trim() }));
+  // hand-placed marks live in localStorage as "sa_marks_<race key>" and change every tab; this
+  // regatta's keys are "<regatta id>/<race id>/<…>" (races added in the app) or the race name
+  // (the repo's own races), so marks kept for other regattas don't count
+  const handPlaced = (() => {
+    const rid = $('#regSel') ? $('#regSel').value : '', names = new Set(races.map(r => r.name));
+    try {
+      return Object.keys(localStorage).filter(k => k.startsWith('sa_marks_') && localStorage.getItem(k))
+        .map(k => k.slice('sa_marks_'.length)).filter(k => k.startsWith(rid + '/') || names.has(k)).length;
+    } catch (e) { return null; }
+  })();
   const tabs = [...document.querySelectorAll('#tabs button[data-tab]')].map(b => b.dataset.tab);
   const out = { app: 'sail-analyzer-ui-snapshot', version: 2, focus: FOCUS, handPlacedMarks: handPlaced, tabs, races: [] };
   for (const r of races) {
