@@ -37,8 +37,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import numpy as np
 
-import regatta as R
-import results as RS
+if __package__ in (None, ""):          # run as a script (python sail_analyzer/app.py, the .bat):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # the package's parent
+
+from sail_analyzer import regatta as R                      # noqa: E402
+from sail_analyzer import results as RS                     # noqa: E402
+from sail_analyzer.entities.course import TEMPLATES, normalize_course, parse_legs, template_course  # noqa: E402,F401
+from sail_analyzer.entities.start import gun_from_clock     # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.dirname(HERE)               # the folder with 01_Prueba 1 ...
@@ -55,29 +60,6 @@ def regatta_lock(rid):
     with _RLOCKS_GUARD:
         return _RLOCKS.setdefault(rid, threading.RLock())
 
-# Course templates offered in the UI. Legs: "<type>:<mark>[*]" — type U(pwind) /
-# R(each) / D(ownwind), the mark the leg ends at, * = that mark is a gate.
-# The last leg always ends at the finish line.
-TEMPLATES = [
-    {"id": "trap_outer", "name": "Trapezoid outer — reach finish", "legs": "U:1 R:2 D:G* U:2 D:G* R:F"},
-    {"id": "trap_outer_wing", "name": "Trapezoid outer, wing mark moved (2a/2b)", "legs": "U:1 R:2a D:G* U:2b D:G* R:F"},
-    {"id": "trap_inner", "name": "Trapezoid inner — reach finish", "legs": "U:1 D:4* U:1 R:2 D:3 R:F"},
-    {"id": "wl2_dn", "name": "Windward-leeward, 2 laps, downwind finish", "legs": "U:1 D:G* U:1 D:F"},
-    {"id": "wl2_up", "name": "Windward-leeward, 2 laps, upwind finish", "legs": "U:1 D:G* U:1 D:G* U:F"},
-    {"id": "wl3_dn", "name": "Windward-leeward, 3 laps, downwind finish", "legs": "U:1 D:G* U:1 D:G* U:1 D:F"},
-]
-
-
-def parse_legs(spec: str):
-    out = []
-    for tok in spec.split():
-        typ, mark = tok.split(":")
-        out.append({"type": typ, "mark": mark.rstrip("*"), "gate": mark.endswith("*")})
-    return out
-
-
-def template_course(tid):
-    return parse_legs(next(t["legs"] for t in TEMPLATES if t["id"] == tid))
 
 PALETTE = ["#e6194B", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4",
            "#42d4f4", "#f032e6", "#bfef45", "#fabed4", "#469990", "#dcbeff",
@@ -109,17 +91,6 @@ def list_kml(d):
 def clean_text(s, n=80):
     """Names shown in the UI come from users/filenames: drop markup characters."""
     return re.sub(r"[<>\"`\x00-\x1f]", "", str(s or "")).strip()[:n]
-
-
-def gun_from_clock(clock: str, t0: float):
-    """'HH:MM[:SS]' (UTC) on the day of the first fix -> epoch seconds."""
-    parts = [int(x) for x in clock.strip().split(":")]
-    h, m, sec = (parts + [0, 0])[:3]
-    day = datetime.fromtimestamp(t0, timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    g = day.timestamp() + h * 3600 + m * 60 + sec
-    if g < t0 - 3 * 3600:                         # track started the evening before
-        g += 86400
-    return float(g)
 
 
 def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
@@ -614,31 +585,6 @@ def kml_files(race):
     return list_kml(race_dir_abs(race))
 
 
-def normalize_course(course):
-    """Validate a course from the UI: >= 2 legs, types U/R/D, mark labels 1-6
-    chars (RC/Pin reserved); the finish label must not be a rounding mark."""
-    if not isinstance(course, list) or len(course) < 2:
-        raise ValueError("A course needs at least 2 legs.")
-    out = []
-    for i, leg in enumerate(course):
-        if not isinstance(leg, dict):
-            raise ValueError(f"Leg {i + 1}: bad format.")
-        typ = str(leg.get("type", "")).upper()[:1]
-        mark = str(leg.get("mark", "")).strip()[:6]
-        if mark and not re.fullmatch(r"[A-Za-z0-9._-]+", mark):
-            raise ValueError(f"Leg {i + 1}: mark labels use letters, digits, '.', '_' or '-'.")
-        if typ not in ("U", "R", "D"):
-            raise ValueError(f"Leg {i + 1}: type must be upwind, reach or downwind.")
-        if not mark:
-            raise ValueError(f"Leg {i + 1}: give the mark it ends at.")
-        if mark in ("RC", "Pin"):
-            raise ValueError(f"Leg {i + 1}: '{mark}' is reserved for the start line.")
-        out.append({"type": typ, "mark": mark, "gate": bool(leg.get("gate")) and i < len(course) - 1})
-    if out[-1]["mark"] in [leg["mark"] for leg in out[:-1]]:
-        raise ValueError("The last leg ends at the finish: give it its own label (e.g. F).")
-    return out
-
-
 def race_fields(body, race):
     """Validated name / course / gun from a request body."""
     course, gun = course_and_gun(body)
@@ -672,7 +618,7 @@ def normalize_gun(gun):
 # Cache: cache/<regatta>/<race>.json (+ .meta.json), cache/<regatta>/index.json
 # --------------------------------------------------------------------------- #
 # caches older than the code this process runs are rebuilt
-SRC_MTIME = max(os.path.getmtime(os.path.join(HERE, f)) for f in ("regatta.py", "app.py"))
+SRC_MTIME = max(os.path.getmtime(f) for f in glob.glob(os.path.join(HERE, "**", "*.py"), recursive=True))
 
 
 def race_cfg_hash(race):
