@@ -36,12 +36,17 @@ def entity_may_import(what):
     """Another entity (relative, same package) or a pure stdlib module / numpy."""
     if what.startswith("."):
         return not what.startswith("..")
-    return what.split(".")[0] in PURE_STDLIB | THIRD_PARTY or what.startswith("sail_analyzer.entities")
+    return what.split(".")[0] in PURE_STDLIB | THIRD_PARTY or what == "sail_analyzer.entities" \
+        or what.startswith("sail_analyzer.entities.")
 
 
 def side_effects(tree):
-    """(line, call) for calls that do I/O or read the clock."""
+    """(line, call) for calls that do I/O or read the clock, and I/O names imported to call bare."""
     for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for a in node.names:
+                if a.name in SIDE_EFFECT_ATTRS:
+                    yield node.lineno, "import " + a.name
         if isinstance(node, ast.Call):
             f = node.func
             if isinstance(f, ast.Name) and f.id in SIDE_EFFECT_CALLS:
@@ -57,7 +62,7 @@ def parse(path):
 
 class EntitiesArePure(unittest.TestCase):
     def files(self):
-        files = sorted(glob.glob(os.path.join(ENTITIES, "*.py")))
+        files = sorted(glob.glob(os.path.join(glob.escape(ENTITIES), "**", "*.py"), recursive=True))
         self.assertTrue(files, "no entities found")
         return files
 
@@ -78,11 +83,13 @@ class EntitiesArePure(unittest.TestCase):
                    "sail_analyzer.entities.track"):
             self.assertTrue(entity_may_import(ok), ok)
         for bad in ("os", "io", "json", "urllib.request", "http.server", "threading", "xml.etree.ElementTree",
-                    "glob", "..app", "..regatta", "sail_analyzer.app", "sail_analyzer", "time"):
+                    "glob", "..app", "..regatta", "sail_analyzer.app", "sail_analyzer", "time",
+                    "sail_analyzer.entities_io"):
             self.assertFalse(entity_may_import(bad), bad)
-        bad = ast.parse("open('f')\nprint(1)\nnp.load('x')\na.tofile('y')\ndatetime.now()\nnp.mean(a)\n")
-        self.assertEqual([c for _l, c in side_effects(bad)],
-                         ["open()", "print()", ".load()", ".tofile()", ".now()"])
+        bad = ast.parse("from numpy import load, mean\nopen('f')\nprint(1)\nnp.load('x')\na.tofile('y')\n"
+                        "datetime.now()\nnp.mean(a)\n")
+        self.assertEqual(sorted(c for _l, c in side_effects(bad)),
+                         sorted(["import load", "open()", "print()", ".load()", ".tofile()", ".now()"]))
 
 
 class PackageEntryPoints(unittest.TestCase):
@@ -90,6 +97,21 @@ class PackageEntryPoints(unittest.TestCase):
         import importlib
         app = importlib.import_module("sail_analyzer.app")
         self.assertTrue(callable(app.main))
+
+    def test_script_mode_like_the_launcher(self):
+        """The .bat runs `python app.py` inside sail_analyzer/ (and launch.json `python sail_analyzer/app.py`):
+        app.py must make the package importable itself. Loaded in a fresh interpreter, without
+        starting the server (not run as __main__)."""
+        import subprocess
+        import sys
+        code = ("import runpy, sys\n"
+                "assert not any(p and __import__('os').path.isdir(__import__('os').path.join(p, 'sail_analyzer')) "
+                "for p in sys.path), 'repo root already importable'\n"
+                "g = runpy.run_path('app.py', run_name='launcher_check')\n"
+                "assert callable(g['main']) and 'sail_analyzer.entities.course' in sys.modules\n"
+                "print('ok')\n")
+        r = subprocess.run([sys.executable, "-c", code], cwd=support.PKG, capture_output=True, text=True, timeout=120)
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "ok"), r.stderr[-2000:])
 
     def test_module_entry_point_runs_only_as_main(self):
         tree = parse(os.path.join(support.PKG, "__main__.py"))

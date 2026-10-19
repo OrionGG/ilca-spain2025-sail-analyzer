@@ -37,8 +37,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import numpy as np
 
-if __package__ in (None, ""):          # run as a script (python sail_analyzer/app.py, the .bat):
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # the package's parent
+if __package__ in (None, ""):          # run as a script (python sail_analyzer/app.py, the .bat): the
+    # package's parent (the tracks folder) goes last, so nothing there shadows the stdlib
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sail_analyzer import regatta as R                      # noqa: E402
 from sail_analyzer import results as RS                     # noqa: E402
