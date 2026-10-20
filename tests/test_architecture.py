@@ -59,15 +59,36 @@ def layer_files(test, root, name):
     return files
 
 
-def is_port_call(f):
-    """self.<gateway>.<method>(...): a use case reaching the outside world through a gateway it
-    was given (its own interfaces), which is how I/O is meant to come in."""
-    return isinstance(f.value, ast.Attribute) and isinstance(f.value.value, ast.Name) and f.value.value.id == "self"
+def injected(tree):
+    """The gateways a use case is given: attributes an __init__ sets straight from its own
+    parameters (self.repo = repo, or self.a, self.b = a, b)."""
+    out = set()
+    for fn in ast.walk(tree):
+        if not (isinstance(fn, ast.FunctionDef) and fn.name == "__init__"):
+            continue
+        params = {a.arg for a in fn.args.args[1:] + fn.args.kwonlyargs}
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.Assign):
+                continue
+            for t in node.targets:
+                pairs = (zip(t.elts, node.value.elts) if isinstance(t, ast.Tuple) and isinstance(node.value, ast.Tuple)
+                         else [(t, node.value)])
+                out |= {a.attr for a, v in pairs
+                        if isinstance(a, ast.Attribute) and isinstance(a.value, ast.Name) and a.value.id == "self"
+                        and isinstance(v, ast.Name) and v.id in params}
+    return out
 
 
-def side_effects(tree, ports=False):
+def is_port_call(f, ports):
+    """self.<gateway>.<method>(...) on an injected gateway: a use case reaching the outside world
+    through its own interfaces, which is how I/O is meant to come in."""
+    return isinstance(f.value, ast.Attribute) and f.value.attr in ports \
+        and isinstance(f.value.value, ast.Name) and f.value.value.id == "self"
+
+
+def side_effects(tree, ports=frozenset()):
     """(line, call) for calls that do I/O or read the clock, and I/O names imported to call bare.
-    ports: calls through injected gateways (self.<gateway>.<method>()) are allowed."""
+    ports: injected gateways (see injected), whose calls are allowed."""
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             for a in node.names:
@@ -77,7 +98,7 @@ def side_effects(tree, ports=False):
             f = node.func
             if isinstance(f, ast.Name) and f.id in SIDE_EFFECT_CALLS:
                 yield node.lineno, f.id + "()"
-            elif isinstance(f, ast.Attribute) and f.attr in SIDE_EFFECT_ATTRS and not (ports and is_port_call(f)):
+            elif isinstance(f, ast.Attribute) and f.attr in SIDE_EFFECT_ATTRS and not is_port_call(f, ports):
                 yield node.lineno, "." + f.attr + "()"
 
 
@@ -131,7 +152,8 @@ class UseCasesDependOnEntitiesOnly(unittest.TestCase):
 
     def test_no_side_effects(self):
         for path in self.files():
-            found = list(side_effects(parse(path), ports=True))
+            tree = parse(path)
+            found = list(side_effects(tree, injected(tree)))
             self.assertFalse(found, f"use_cases/{os.path.basename(path)} does I/O: {found}")
 
     def test_the_rule_itself(self):
@@ -142,10 +164,19 @@ class UseCasesDependOnEntitiesOnly(unittest.TestCase):
                     "sail_analyzer.interface_adapters.presenters", "sail_analyzer.use_cases_io",
                     "os", "json", "http.server", "urllib.request", "threading", "xml.etree.ElementTree"):
             self.assertFalse(use_case_may_import(bad), bad)
-        code = ast.parse("self.repo.load()\nself.store.save(1)\nself.clock.now_iso()\n"
-                         "np.load('x')\nself.load()\nrepo.load()\nself.a.b.save()\ndatetime.now()\n")
-        self.assertEqual(sorted(c for _l, c in side_effects(code, ports=True)),
-                         sorted([".load()", ".load()", ".load()", ".save()", ".now()"]))
+        code = ast.parse(
+            "import datetime\n"
+            "class Uc:\n"
+            "    def __init__(self, repo, store, clock, n=1):\n"
+            "        self.repo = repo\n"
+            "        self.store, self.clock, self.n = store, clock, n\n"
+            "        self.dt, self.np = datetime, make()\n"
+            "    def run(self):\n"
+            "        self.repo.load(); self.store.save(1); self.clock.now()\n"     # injected gateways
+            "        self.dt.now(); self.np.load('x'); self.load(); repo.load(); self.repo.x.save()\n")
+        self.assertEqual(injected(code), {"repo", "store", "clock", "n"})
+        self.assertEqual(sorted(c for _l, c in side_effects(code, injected(code))),
+                         sorted([".now()", ".load()", ".load()", ".load()", ".save()"]))
 
 
 class CacheStaleness(unittest.TestCase):

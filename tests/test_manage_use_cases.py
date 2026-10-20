@@ -262,7 +262,8 @@ class RaceAnalysesTest(unittest.TestCase):
 
     def test_index(self):
         w = self.w
-        self.assertIsNone(w.analyses.index("nope"))
+        with self.assertRaises(NotFound):
+            w.analyses.index("nope")
         idx = w.analyses.index("copa")
         self.assertEqual([(e["i"], e["id"]) for e in idx], [(0, "r01")])  # r02 has no tracks
         self.assertEqual(w.locks.taken, ["copa"])

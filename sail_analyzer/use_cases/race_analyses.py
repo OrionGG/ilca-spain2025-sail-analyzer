@@ -84,18 +84,18 @@ class RaceAnalyses:
 
     # -- a regatta -----------------------------------------------------------------
     def index(self, rid, rebuild=False):
-        """Build missing/stale races of one regatta and return its index (None: unknown regatta)."""
+        """Build missing/stale races of one regatta and return its index (NotFound: unknown regatta)."""
         rg = find_regatta(self.repo.load(), rid)
         if rg is None:
-            return None
+            raise NotFound("unknown regatta")
         todo = {r["id"] for r in rg["races"]
                 if rebuild or self.cache.state(rid, r)[0] not in ("fresh", "error")}
         if not todo:
             return self._index(rid, rg)               # nothing to build: don't wait for the lock
         with self.locks.regatta(rid):
             rg = find_regatta(self.repo.load(), rid)
-            if rg is None:
-                return None
+            if rg is None:                            # deleted meanwhile
+                raise NotFound("unknown regatta")
             for race in rg["races"]:
                 if race["id"] not in todo:
                     continue

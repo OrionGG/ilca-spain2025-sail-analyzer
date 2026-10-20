@@ -638,8 +638,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(REGATTAS.list())
         m = re.fullmatch(r"/api/index/([a-z0-9-]+)", path)
         if m:
-            idx = ANALYSES.index(m.group(1))      # stat-only when nothing changed
-            return self._json(idx) if idx is not None else self._err("unknown regatta", 404)
+            return self._json(ANALYSES.index(m.group(1)))   # stat-only when nothing changed
         m = re.fullmatch(r"/api/results/([a-z0-9-]+)", path)
         if m:
             return self._json({"ok": True, "results": RESULTS.get(m.group(1))})
@@ -786,7 +785,7 @@ def main():
         print("Rebuilding the analysis cache of every regatta...")
         for rg in reg["regattas"]:
             idx = ensure_cache(rg["id"], rebuild=True)
-            print(f"Ready: {rg['name']} — {len(idx or [])} races cached.")
+            print(f"Ready: {rg['name']} — {len(idx)} races cached.")
     else:
         print("Races are analysed when a regatta is first opened (~10-20 s after an update).")
 
