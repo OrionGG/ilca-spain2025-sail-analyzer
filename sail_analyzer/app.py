@@ -52,7 +52,13 @@ from sail_analyzer import regatta as R                      # noqa: E402
 from sail_analyzer import results as RS                     # noqa: E402
 from sail_analyzer.entities.course import TEMPLATES, normalize_course, parse_legs, template_course  # noqa: E402,F401
 from sail_analyzer.use_cases.analyse_race import AnalyseRace, RaceRequest  # noqa: E402
-from sail_analyzer.use_cases.errors import AnalysisError, TransientError  # noqa: E402
+from sail_analyzer.use_cases.errors import NotFound  # noqa: E402
+from sail_analyzer.use_cases.manage_races import ManageRaces  # noqa: E402
+from sail_analyzer.use_cases.manage_regattas import ManageRegattas  # noqa: E402
+from sail_analyzer.use_cases.official_results import OfficialResults  # noqa: E402
+from sail_analyzer.use_cases.race_analyses import RaceAnalyses, index_entry  # noqa: E402,F401
+from sail_analyzer.use_cases.registry import find_regatta  # noqa: E402
+from sail_analyzer.use_cases.registry import race_num as _race_num, slug as _slug  # noqa: E402,F401
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.dirname(HERE)               # the folder with 01_Prueba 1 ...
@@ -130,6 +136,9 @@ class KmlTrackGateway:
             boats.append(R.Boat(sail=sid, name=disp, file=f, t=t, lat=la, lon=lo))
         return boats
 
+    def count(self, tracks_dir):
+        return len(list_kml(tracks_dir))
+
 
 # decimals each race-summary value is shown with
 SUMMARY_DIGITS = {"race_min": 2, "dist_nm": 2, "sog_mean": 2, "sog_up": 2, "sog_dn": 2, "twa_up": 0,
@@ -187,14 +196,6 @@ def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
 # --------------------------------------------------------------------------- #
 # Regatta / race registry (regattas.json)
 # --------------------------------------------------------------------------- #
-def _slug(name):
-    s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-    return s[:40] or "regatta"
-
-
-def _race_num(race_id):
-    m = re.fullmatch(r"r(\d+)", race_id or "")
-    return int(m.group(1)) if m else 0
 
 
 def _safe_id(s):
@@ -274,30 +275,8 @@ def edit_registry(fn):
         return out
 
 
-def put_race(rid, race_id, new):
-    """Replace one race's registry entry (new dict) or remove it (None)."""
-    def fn(reg):
-        rg = find_regatta(reg, rid)
-        if rg is None:
-            raise ValueError("unknown regatta")
-        if new is None:
-            rg["races"] = [r for r in rg["races"] if r["id"] != race_id]
-            rg["seq"] = max(rg.get("seq", 0), _race_num(race_id))   # keep the id retired
-        else:
-            rg["races"] = [new if r["id"] == race_id else r for r in rg["races"]]
-    edit_registry(fn)
-
-
 def rel_dir(path):
     return os.path.relpath(path, HERE).replace("\\", "/")
-
-
-def find_regatta(reg, rid):
-    return next((g for g in reg["regattas"] if g["id"] == rid), None)
-
-
-def find_race(rg, race_id):
-    return next((r for r in rg["races"] if r["id"] == race_id), None)
 
 
 def race_dir_abs(race):
@@ -329,12 +308,6 @@ def is_upload_dir(path):
 
 def kml_files(race):
     return list_kml(race_dir_abs(race))
-
-
-def race_fields(body, race):
-    """Validated name / course / gun from a request body."""
-    course, gun = course_and_gun(body)
-    return {"course": course, "gun": gun, "name": clean_text(body.get("name", race["name"]), 60) or race["name"]}
 
 
 def course_and_gun(body):
@@ -419,14 +392,14 @@ def _write_json(path, obj, compact=False):
     atomic_write(path, json.dumps(obj, separators=(",", ":") if compact else None))
 
 
-def store_race_cache(rid, race, data, cfg):
-    """cfg = race_cfg_hash of the tracks as they were when the analysis read them.
-    The meta is invalidated first: data without a matching meta is stale, never "fresh"."""
+def store_race_cache(rid, race, data, cfg, entry):
+    """cfg = race_cfg_hash of the tracks as they were when the analysis read them; entry = the
+    race's regatta-index entry. The meta is invalidated first: data without a matching meta is
+    stale, never "fresh"."""
     _write_json(_meta_path(rid, race["id"]), {"cfg": None})   # atomic + retried, unlike a delete
     _write_json(race_cache_path(rid, race["id"]), data, compact=True)
     _write_json(_meta_path(rid, race["id"]), {"cfg": cfg, "name": race["name"],
-                                              "key": race.get("key"),
-                                              "entry": index_entry(0, race["id"], data)})
+                                              "key": race.get("key"), "entry": entry})
 
 
 def remove_file(path):
@@ -471,137 +444,175 @@ def cache_state(rid, race):
     return "stale", meta, h
 
 
-def build_race_cached(rid, race, force=False):
-    """(Re)build one race's cache when missing/stale. Returns an error string or
-    None. A failed build removes the old cache so stale results are never served."""
-    state, meta, h = cache_state(rid, race)
-    if not force:
-        if state == "fresh":
-            return None
-        if state == "error":
-            return meta["error"]
-        if state == "patch":                      # rename / new marks key: no re-parse
-            data = _read_json(race_cache_path(rid, race["id"]))
-            if data is not None:
-                data["race"], data["key"] = race["name"], race.get("key") or race["name"]
-                store_race_cache(rid, race, data, h)
-                return None
-    try:
-        data = analyse(race_dir_abs(race), race)
-    except AnalysisError as e:
-        drop_race_cache(rid, race["id"])
-        if e.permanent:                           # same inputs will fail again: remember it
-            _write_json(_meta_path(rid, race["id"]), {"cfg": h, "error": str(e)})
-        return str(e)
-    store_race_cache(rid, race, data, h)
-    return None
+# --------------------------------------------------------------------------- #
+# Gateways for the use cases, and the wiring (transitional: they move to the
+# interface adapters / frameworks circles in steps 4-5). Module globals are read
+# at call time, so tests can point the app at temporary folders.
+# --------------------------------------------------------------------------- #
+class JsonRegattaRepository:
+    def load(self):
+        return load_registry()
+
+    def edit(self, fn):
+        return edit_registry(fn)
+
+    def view(self, fn):
+        with REG_RMW:
+            return fn(load_registry())
 
 
-def analysed(race, tracks_dir):
-    """(data, cfg): analysis of a race config on a folder of tracks + the hash of those tracks."""
-    cfg = race_cfg_hash({**race, "dir": tracks_dir})
-    return analyse(tracks_dir, race), cfg
+class FileAnalysisCache:
+    def state(self, rid, race):
+        return cache_state(rid, race)
+
+    def config_hash(self, race, tracks_dir):
+        return race_cfg_hash({**race, "dir": tracks_dir})
+
+    def read(self, rid, race_id):
+        return _read_json(race_cache_path(rid, race_id))
+
+    def meta(self, rid, race_id):
+        return _read_json(_meta_path(rid, race_id))
+
+    def exists(self, rid, race_id):
+        return os.path.exists(race_cache_path(rid, race_id))
+
+    def store(self, rid, race, data, cfg, entry):
+        store_race_cache(rid, race, data, cfg, entry)
+
+    def store_error(self, rid, race_id, cfg, error):
+        _write_json(_meta_path(rid, race_id), {"cfg": cfg, "error": error})
+
+    def drop(self, rid, race_id):
+        drop_race_cache(rid, race_id)
+
+    def regatta_exists(self, rid):
+        return os.path.exists(os.path.join(CACHE_DIR, rid))
+
+    def drop_regatta(self, rid):
+        shutil.rmtree(os.path.join(CACHE_DIR, rid), ignore_errors=True)
 
 
-def save_analysed(rid, race, data, cfg):
-    """Cache first, registry last: if either write fails the registry still has the old
-    config, and a cache made for a config the registry doesn't have is just stale."""
-    store_race_cache(rid, race, data, cfg)
-    put_race(rid, race["id"], race)
+class UploadFolders:
+    def race_dir(self, race):
+        return race_dir_abs(race)
+
+    def is_upload(self, race):
+        return is_upload_dir(race_dir_abs(race))
+
+    def new_race_dir(self, rid, race_id):
+        d = upload_dir_for(rid, race_id)
+        os.makedirs(d, exist_ok=True)
+        return rel_dir(d)
+
+    def staging_dir(self, rid, race_id):
+        return staging_dir_for(rid, race_id)
+
+    def stage(self, rid, race_id):
+        st = staging_dir_for(rid, race_id)
+        shutil.rmtree(st, ignore_errors=True)
+        if os.path.isdir(st) and os.listdir(st):
+            raise ValueError("Could not clear the previous upload (a file is in use) — try again.")
+        os.makedirs(st, exist_ok=True)
+
+    def unstage(self, rid, race_id):
+        shutil.rmtree(staging_dir_for(rid, race_id), ignore_errors=True)
+
+    def put_staged(self, rid, race_id, name, raw):
+        st = staging_dir_for(rid, race_id)
+        if not os.path.isdir(st):
+            raise ValueError("Start an upload (stage) before sending files.")
+        if os.path.dirname(os.path.abspath(os.path.join(st, name))) != os.path.abspath(st):
+            raise ValueError("Unsupported file name.")
+        try:
+            with open(os.path.join(st, name), "xb") as fh:    # staging only; no lock needed
+                fh.write(raw)
+        except FileExistsError:
+            raise ValueError(f"Two tracks named {name}: choose the race's own folder.")
+        except FileNotFoundError:
+            raise ValueError("The upload was restarted by another save — save again.")
+
+    def swap_in(self, rid, race_id):
+        st, d = staging_dir_for(rid, race_id), upload_dir_for(rid, race_id)
+        old = f"{d}.old-{uuid.uuid4().hex[:6]}"   # fresh name: a stuck leftover can't collide
+        if os.path.isdir(d):
+            os.replace(d, old)                    # whole-folder swap: never half-replaced
+        try:
+            os.replace(st, d)
+        except OSError:
+            if os.path.isdir(old):
+                os.replace(old, d)
+            raise
+
+        def undo():                               # new set back to staging, old set back
+            os.replace(d, st)
+            if os.path.isdir(old):
+                os.replace(old, d)
+        return rel_dir(d), undo, lambda: shutil.rmtree(old, ignore_errors=True)
+
+    def delete_race(self, rid, race):
+        if is_upload_dir(race_dir_abs(race)):
+            shutil.rmtree(race_dir_abs(race), ignore_errors=True)
+        shutil.rmtree(staging_dir_for(rid, race["id"]), ignore_errors=True)
+
+    def regatta_exists(self, rid):
+        return os.path.exists(os.path.join(UPLOAD_DIR, rid))
+
+    def delete_regatta(self, rid):
+        shutil.rmtree(os.path.join(UPLOAD_DIR, rid), ignore_errors=True)
 
 
-def analyse(race_dir, race):
-    """Run the analysis for a race config on a folder of tracks; AnalysisError if it fails."""
-    if not list_kml(race_dir):
-        raise AnalysisError("No .kml files in this race's folder — choose its tracks folder.")
-    print(f"  parsing {race['name']} ...", flush=True)
-    try:
-        data = build_race(race_dir, race["name"], race["course"], race.get("gun"), race.get("key"))
-    except AnalysisError:
-        raise
-    except (OSError, MemoryError) as e:
-        raise TransientError(f"Could not read the tracks right now ({type(e).__name__}: {e}) — try again.")
-    except Exception as e:
-        raise AnalysisError(f"Analysis failed: {type(e).__name__}: {e}")
-    if data is None:
-        raise AnalysisError("No usable tracks: expected TracTrac KML files (timestamped points, 30+ fixes per boat).")
-    return data
+class ResultsPage:
+    def fetch(self, url):
+        return RS.fetch_results(url)
 
 
-def build_index(rid, rg):
-    """The regatta's race index, assembled from the per-race meta entries (no track data)."""
-    index = []
-    for race in rg["races"]:
-        meta = _read_json(_meta_path(rid, race["id"]))
-        if meta and meta.get("entry") and os.path.exists(race_cache_path(rid, race["id"])):
-            index.append({**meta["entry"], "i": len(index)})
-    return index
+class ResultsFiles:
+    def save(self, rid, data):
+        _write_json(results_path(rid), data)
+
+    def load(self, rid):
+        return _read_json(results_path(rid))
+
+    def remove(self, rid):
+        remove_file(results_path(rid))
+
+
+class RegattaLocksInProcess:
+    def regatta(self, rid):
+        return regatta_lock(rid)
+
+
+class UtcClock:
+    def now_iso(self):
+        return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+class RandomMarksKeys:
+    def new(self, rid, race_id):
+        return new_key(rid, race_id)
+
+
+class JsonRacePresenter:
+    def present(self, analysis):
+        return present_race(analysis)
+
+
+def _console(line):
+    print(line, flush=True)
+
+
+_TRACKS, _REPO, _CACHE, _FOLDERS = KmlTrackGateway(), JsonRegattaRepository(), FileAnalysisCache(), UploadFolders()
+_LOCKS = RegattaLocksInProcess()
+ANALYSES = RaceAnalyses(_TRACKS, JsonRacePresenter(), _REPO, _CACHE, _FOLDERS, _LOCKS, _console)
+REGATTAS = ManageRegattas(_REPO, _CACHE, _FOLDERS, _TRACKS, _LOCKS)
+RACES = ManageRaces(_REPO, ANALYSES, _FOLDERS, _CACHE, _TRACKS, RandomMarksKeys(), _LOCKS)
+RESULTS = OfficialResults(_REPO, ResultsPage(), ResultsFiles(), UtcClock())
 
 
 def ensure_cache(rid, rebuild=False):
     """Build missing/stale races of one regatta and return its index."""
-    rg = find_regatta(load_registry(), rid)
-    if rg is None:
-        return None
-    todo = {r["id"] for r in rg["races"]
-            if rebuild or cache_state(rid, r)[0] not in ("fresh", "error")}
-    if not todo:
-        return build_index(rid, rg)               # nothing to build: don't wait for the lock
-    with regatta_lock(rid):
-        rg = find_regatta(load_registry(), rid)
-        if rg is None:
-            return None
-        for race in rg["races"]:
-            if race["id"] not in todo:
-                continue
-            try:
-                err = build_race_cached(rid, race, force=rebuild)
-            except Exception as e:                # one race's failure must not sink the regatta
-                err = f"{type(e).__name__}: {e}"
-            if err:
-                print(f"  ! {race['name']}: {err}", flush=True)
-        return build_index(rid, rg)
-
-
-def index_entry(i, race_id, data):
-    """Regatta trends: per-boat mini-summary + finisher medians + finish rank."""
-    import statistics as _st
-    fin = [b for b in data["boats"] if b["summary"].get("finished")]
-    def _med(k):
-        vals = [b["summary"][k] for b in fin if b["summary"].get(k) is not None]
-        return round(_st.median(vals), 2) if vals else None
-    keys = ("race_min", "sog_up", "sog_dn", "vmg_up", "vmg_dn", "twa_up",
-            "tack_loss", "gybe_loss", "dist_nm", "n_tacks", "n_gybes")
-    fleet = {k: _med(k) for k in keys}
-    order = sorted([b for b in fin if b["summary"].get("race_min") is not None],
-                   key=lambda b: b["summary"]["race_min"])
-    rank = {b["sail"]: j + 1 for j, b in enumerate(order)}
-    mini = {}
-    for b in data["boats"]:
-        s = b["summary"]
-        mini[b["sail"]] = {**{k: s.get(k) for k in keys}, "name": b.get("name"),
-                           "finished": s.get("finished"),
-                           "rank": rank.get(b["sail"]), "n_fin": len(order)}
-    return {"i": i, "id": race_id, "race": data["race"], "start_iso": data["start_iso"],
-            "wind_from": data["wind_from"], "n_boats": len(data["boats"]),
-            "fleet": fleet, "boats": mini}
-
-
-def registry_view():
-    reg = load_registry()
-    out = []
-    for rg in reg["regattas"]:
-        races = []
-        for r in rg["races"]:
-            meta = _read_json(_meta_path(rg["id"], r["id"])) or {}
-            races.append({"id": r["id"], "name": r["name"], "course": r["course"], "gun": r.get("gun"),
-                          "n_files": len(kml_files(r)), "uploaded": is_upload_dir(race_dir_abs(r)),
-                          "analysed": os.path.exists(race_cache_path(rg["id"], r["id"])),
-                          "error": meta.get("error")})
-        res = rg.get("results")
-        out.append({"id": rg["id"], "name": rg["name"], "races": races,
-                    "results": {k: res.get(k) for k in ("url", "fetched", "columns", "n", "map")} if res else None})
-    return {"regattas": out, "templates": [{**t, "course": parse_legs(t["legs"])} for t in TEMPLATES]}
+    return ANALYSES.index(rid, rebuild)
 
 
 # --------------------------------------------------------------------------- #
@@ -632,6 +643,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, "forbidden", "text/plain")
         try:
             return self._get(urlparse(self.path).path)
+        except NotFound as e:
+            return self._err(str(e), 404)
         except Exception as e:
             return self._err(f"Server error: {type(e).__name__}: {e}", 500)
 
@@ -645,36 +658,21 @@ class Handler(BaseHTTPRequestHandler):
                      else "application/octet-stream")
             return self._file(fp, ctype)
         if path == "/api/regattas":
-            return self._json(registry_view())
+            return self._json(REGATTAS.list())
         m = re.fullmatch(r"/api/index/([a-z0-9-]+)", path)
         if m:
-            idx = ensure_cache(m.group(1))        # stat-only when nothing changed
+            idx = ANALYSES.index(m.group(1))      # stat-only when nothing changed
             return self._json(idx) if idx is not None else self._err("unknown regatta", 404)
         m = re.fullmatch(r"/api/results/([a-z0-9-]+)", path)
         if m:
-            with REG_RMW:                                 # written together (download / delete)
-                rg = find_regatta(load_registry(), m.group(1))
-                data = _read_json(results_path(rg["id"])) if rg and rg.get("results") else None
-            if rg is None:
-                return self._err("unknown regatta", 404)
-            return self._json({"ok": True, "results": {**rg["results"], **data} if data else None})
+            return self._json({"ok": True, "results": RESULTS.get(m.group(1))})
         m = re.fullmatch(r"/api/race/([a-z0-9-]+)/([a-z0-9-]+)", path)
         if m:
-            rid = m.group(1)
-            rg = find_regatta(load_registry(), rid)
-            race = find_race(rg, m.group(2)) if rg else None
-            if race is None:
-                return self._err("unknown race", 404)
-            if cache_state(rid, race)[0] != "fresh":
-                with regatta_lock(rid):           # re-read: the race may have changed meanwhile
-                    rg = find_regatta(load_registry(), rid)
-                    race = find_race(rg, race["id"]) if rg else None
-                    if race is None:
-                        return self._err("unknown race", 404)
-                    err = build_race_cached(rid, race)
-                if err:
-                    return self._err(err)
-            return self._file(race_cache_path(rid, race["id"]), "application/json")
+            rid, race_id = m.group(1), m.group(2)
+            err = ANALYSES.race(rid, race_id)
+            if err:
+                return self._err(err)
+            return self._file(race_cache_path(rid, race_id), "application/json")
         self._send(404, "not found", "text/plain")
 
     def _body(self):
@@ -714,6 +712,8 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 raise ValueError("Bad request body.")
             return self._route(parts, body)
+        except NotFound as e:
+            return self._err(str(e), 404)
         except ValueError as e:
             return self._err(str(e))
         except Exception as e:                    # never leave the client without a response
@@ -721,166 +721,53 @@ class Handler(BaseHTTPRequestHandler):
 
     def _route(self, parts, body):
         if parts == ["api", "regattas"]:                                   # create regatta
-            name = clean_text(body.get("name"), 80)
-            if not name:
-                raise ValueError("Give the regatta a name.")
-
-            def taken(reg, rid):              # registered, or leftovers of a deleted one
-                return find_regatta(reg, rid) or os.path.exists(os.path.join(UPLOAD_DIR, rid)) \
-                    or os.path.exists(os.path.join(CACHE_DIR, rid))
-
-            def add(reg):
-                rid, k = _slug(name), 2
-                while taken(reg, rid):
-                    rid, k = f"{_slug(name)}-{k}", k + 1
-                reg["regattas"].append({"id": rid, "name": name, "races": []})
-                return rid
-            return self._json({"ok": True, "id": edit_registry(add)})
+            return self._json({"ok": True, "id": REGATTAS.create(clean_text(body.get("name"), 80))})
         rid = parts[2] if len(parts) > 2 else ""
         if not _safe_id(rid) or find_regatta(load_registry(), rid) is None:
             return self._err("unknown regatta", 404)
         if parts[3:] == ["results"]:                                      # download official results
-            url = str(body.get("url", "")).strip()
-            res = RS.fetch_results(url)                   # network: outside any lock
-
-            def save(reg):                                # the file and its registry entry together
-                g = find_regatta(reg, rid)
-                if g is None:
-                    raise ValueError("unknown regatta")
-                _write_json(results_path(rid), {"races": res["races"], "rows": res["rows"]})
-                default_map = [g["races"][i]["id"] if i < len(g["races"]) else None for i in range(len(res["races"]))]
-                old = g.get("results") or {}
-                by_name = dict(zip(old.get("columns") or [], old.get("map") or []))
-                mp = [by_name[c] if c in by_name else None for c in res["races"]]
-                used = {m for m in mp if m}
-                for i, c in enumerate(res["races"]):          # new columns: positional default if free
-                    if c not in by_name and default_map[i] and default_map[i] not in used:
-                        mp[i] = default_map[i]
-                        used.add(mp[i])
-                g["results"] = {"url": url, "fetched": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                                "columns": res["races"], "n": len(res["rows"]), "map": mp}
-            edit_registry(save)
-            return self._json({"ok": True, "n": len(res["rows"]), "columns": res["races"]})
+            n, columns = RESULTS.download(rid, str(body.get("url", "")).strip())
+            return self._json({"ok": True, "n": n, "columns": columns})
         if parts[3:] == ["results", "map"]:                               # result column -> race
-            def set_map(reg):
-                g = find_regatta(reg, rid)
-                if g is None or not g.get("results"):
-                    raise ValueError("No official results for this regatta.")
-                ids = {r["id"] for r in g["races"]}
-                mp = body.get("map")
-                if not isinstance(mp, list) or len(mp) != len(g["results"]["columns"]):
-                    raise ValueError("Bad results mapping.")
-                g["results"]["map"] = [m if m in ids else None for m in mp]
-            edit_registry(set_map)
+            RESULTS.set_map(rid, body.get("map"))
             return self._json({"ok": True})
         if parts[3:] == ["results", "delete"]:
-            def drop(reg):
-                g = find_regatta(reg, rid)
-                if g is not None:
-                    g.pop("results", None)
-                remove_file(results_path(rid))
-            edit_registry(drop)
+            RESULTS.remove(rid)
             return self._json({"ok": True})
         if parts[3:] == ["rename"]:
-            name = clean_text(body.get("name"), 80)
-            if not name:
-                raise ValueError("Give the regatta a name.")
-            def rename(reg):
-                g = find_regatta(reg, rid)
-                if g is None:
-                    raise ValueError("unknown regatta")
-                g["name"] = name
-            edit_registry(rename)
+            REGATTAS.rename(rid, clean_text(body.get("name"), 80))
             return self._json({"ok": True})
-        with regatta_lock(rid):                   # one regatta's analyses/track swaps at a time
-            return self._regatta_route(rid, parts, body)
-
-    def _regatta_route(self, rid, parts, body):
-        rg = find_regatta(load_registry(), rid)   # snapshot; changes go through edit_registry
-        if rg is None:
-            return self._err("unknown regatta", 404)
         if parts[3:] == ["delete"]:
-            edit_registry(lambda reg: reg.update(regattas=[g for g in reg["regattas"] if g["id"] != rid]))
-            for d in (os.path.join(UPLOAD_DIR, rid), os.path.join(CACHE_DIR, rid)):
-                shutil.rmtree(d, ignore_errors=True)       # app-made copies/caches only
+            REGATTAS.delete(rid)
             return self._json({"ok": True})
         if parts[3:] == ["races"]:                                         # create race
             course, gun = course_and_gun(body)
-
-            def add(reg):
-                g = find_regatta(reg, rid)
-                name = clean_text(body.get("name"), 60) or f"Race {len(g['races']) + 1}"
-                k = max([g.get("seq", 0), len(g["races"])] + [_race_num(r["id"]) for r in g["races"]]) + 1
-                while f"r{k:02d}" in {r["id"] for r in g["races"]}:
-                    k += 1
-                g["seq"] = k
-                race_id = f"r{k:02d}"
-                d = upload_dir_for(rid, race_id)
-                os.makedirs(d, exist_ok=True)
-                g["races"].append({"id": race_id, "name": name, "dir": rel_dir(d),
-                                   "course": course, "gun": gun, "key": new_key(rid, race_id)})
-                return race_id
-            return self._json({"ok": True, "id": edit_registry(add)})
-        race = find_race(rg, parts[4]) if len(parts) > 5 and parts[3] == "race" else None
-        if race is None:
+            return self._json({"ok": True, "id": RACES.create(rid, clean_text(body.get("name"), 60), course, gun)})
+        if len(parts) <= 5 or parts[3] != "race":
             return self._err("unknown race", 404)
-        action = parts[5]
+        race_id, action = parts[4], parts[5]
         if action == "update":                    # name / course / gun; analysed before saving
-            new = {**race, **race_fields(body, race)}
-            if new["course"] != race["course"]:
-                new["key"] = new_key(rid, race["id"])    # old hand-edited marks don't fit
-            if (new["course"] != race["course"] or new["gun"] != race.get("gun")) and kml_files(new):
-                data, cfg = analysed(new, race_dir_abs(new))   # raises -> nothing saved
-                save_analysed(rid, new, data, cfg)
-                return self._json({"ok": True})
-            put_race(rid, race["id"], new)        # name only: saved; patch an existing analysis
-            err = build_race_cached(rid, new) if os.path.exists(race_cache_path(rid, race["id"])) else None
+            err = RACES.update(rid, race_id, self._race_name(body), *course_and_gun(body))
             return self._json({"ok": True, **({"warning": err} if err else {})})
         if action == "stage":                     # empty staging folder for a new set of tracks
-            st = staging_dir_for(rid, race["id"])
-            shutil.rmtree(st, ignore_errors=True)
-            if os.path.isdir(st) and os.listdir(st):
-                raise ValueError("Could not clear the previous upload (a file is in use) — try again.")
-            os.makedirs(st, exist_ok=True)
+            RACES.stage(rid, race_id)
             return self._json({"ok": True})
         if action == "unstage":                   # discard the staged copies of a failed save
-            shutil.rmtree(staging_dir_for(rid, race["id"]), ignore_errors=True)
+            RACES.unstage(rid, race_id)
             return self._json({"ok": True})
         if action == "commit":                    # analyse the staged tracks, then swap them in
-            st = staging_dir_for(rid, race["id"])
-            if not list_kml(st):
-                raise ValueError("No uploaded .kml files to use.")
-            new = {**race, **(race_fields(body, race) if "course" in body else {})}
-            new["key"] = new_key(rid, race["id"])  # new tracks: old hand-edited marks don't apply
-            data, cfg = analysed(new, st)         # raises -> the current tracks stay
-            d = upload_dir_for(rid, race["id"])
-            old = f"{d}.old-{uuid.uuid4().hex[:6]}"   # fresh name: a stuck leftover can't collide
-            if os.path.isdir(d):
-                os.replace(d, old)                # whole-folder swap: never half-replaced
-            try:
-                os.replace(st, d)
-            except OSError:
-                if os.path.isdir(old):
-                    os.replace(old, d)
-                raise
-            new["dir"] = rel_dir(d)
-            try:
-                save_analysed(rid, new, data, cfg)    # moved files keep name/size/mtime
-            except Exception:
-                os.replace(d, st)                 # undo: new set back to staging, old set back
-                if os.path.isdir(old):
-                    os.replace(old, d)
-                raise
-            shutil.rmtree(old, ignore_errors=True)
+            config = (self._race_name(body), *course_and_gun(body)) if "course" in body else None
+            RACES.commit(rid, race_id, config)
             return self._json({"ok": True})
         if action == "delete":
-            put_race(rid, race["id"], None)
-            if is_upload_dir(race_dir_abs(race)):
-                shutil.rmtree(race_dir_abs(race), ignore_errors=True)
-            shutil.rmtree(staging_dir_for(rid, race["id"]), ignore_errors=True)
-            drop_race_cache(rid, race["id"])
+            RACES.delete(rid, race_id)
             return self._json({"ok": True})
         return self._err("not found", 404)
+
+    @staticmethod
+    def _race_name(body):
+        """The new name of a race ('' = keep its name)."""
+        return clean_text(body["name"], 60) if "name" in body else ""
 
     def _upload(self, parts, name, raw):
         if len(parts) != 6 or parts[3] != "race":
@@ -894,22 +781,9 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError(f"Not a .kml file: {name}")
         if b"<kml" not in raw[:2000].lower() and b"<placemark" not in raw[:20000].lower():
             raise ValueError(f"{name} does not look like a KML file.")
-        rg = find_regatta(load_registry(), parts[2]) if _safe_id(parts[2]) else None
-        race = find_race(rg, parts[4]) if rg else None
-        if race is None:
+        if not _safe_id(parts[2]):
             return self._err("unknown race", 404)
-        st = staging_dir_for(parts[2], race["id"])
-        if not os.path.isdir(st):
-            raise ValueError("Start an upload (stage) before sending files.")
-        if os.path.dirname(os.path.abspath(os.path.join(st, name))) != os.path.abspath(st):
-            raise ValueError("Unsupported file name.")
-        try:
-            with open(os.path.join(st, name), "xb") as fh:    # staging only; no lock needed
-                fh.write(raw)
-        except FileExistsError:
-            raise ValueError(f"Two tracks named {name}: choose the race's own folder.")
-        except FileNotFoundError:
-            raise ValueError("The upload was restarted by another save — save again.")
+        RACES.upload(parts[2], parts[4], name, raw)
         return self._json({"ok": True})
 
     def _file(self, fp, ctype):

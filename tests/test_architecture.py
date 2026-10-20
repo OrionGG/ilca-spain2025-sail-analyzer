@@ -59,8 +59,15 @@ def layer_files(test, root, name):
     return files
 
 
-def side_effects(tree):
-    """(line, call) for calls that do I/O or read the clock, and I/O names imported to call bare."""
+def is_port_call(f):
+    """self.<gateway>.<method>(...): a use case reaching the outside world through a gateway it
+    was given (its own interfaces), which is how I/O is meant to come in."""
+    return isinstance(f.value, ast.Attribute) and isinstance(f.value.value, ast.Name) and f.value.value.id == "self"
+
+
+def side_effects(tree, ports=False):
+    """(line, call) for calls that do I/O or read the clock, and I/O names imported to call bare.
+    ports: calls through injected gateways (self.<gateway>.<method>()) are allowed."""
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             for a in node.names:
@@ -70,7 +77,7 @@ def side_effects(tree):
             f = node.func
             if isinstance(f, ast.Name) and f.id in SIDE_EFFECT_CALLS:
                 yield node.lineno, f.id + "()"
-            elif isinstance(f, ast.Attribute) and f.attr in SIDE_EFFECT_ATTRS:
+            elif isinstance(f, ast.Attribute) and f.attr in SIDE_EFFECT_ATTRS and not (ports and is_port_call(f)):
                 yield node.lineno, "." + f.attr + "()"
 
 
@@ -124,7 +131,7 @@ class UseCasesDependOnEntitiesOnly(unittest.TestCase):
 
     def test_no_side_effects(self):
         for path in self.files():
-            found = list(side_effects(parse(path)))
+            found = list(side_effects(parse(path), ports=True))
             self.assertFalse(found, f"use_cases/{os.path.basename(path)} does I/O: {found}")
 
     def test_the_rule_itself(self):
@@ -135,6 +142,10 @@ class UseCasesDependOnEntitiesOnly(unittest.TestCase):
                     "sail_analyzer.interface_adapters.presenters", "sail_analyzer.use_cases_io",
                     "os", "json", "http.server", "urllib.request", "threading", "xml.etree.ElementTree"):
             self.assertFalse(use_case_may_import(bad), bad)
+        code = ast.parse("self.repo.load()\nself.store.save(1)\nself.clock.now_iso()\n"
+                         "np.load('x')\nself.load()\nrepo.load()\nself.a.b.save()\ndatetime.now()\n")
+        self.assertEqual(sorted(c for _l, c in side_effects(code, ports=True)),
+                         sorted([".load()", ".load()", ".load()", ".save()", ".now()"]))
 
 
 class CacheStaleness(unittest.TestCase):
