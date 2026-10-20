@@ -51,7 +51,8 @@ if __package__ in (None, "") and "sail_analyzer" not in sys.modules:
 from sail_analyzer import regatta as R                      # noqa: E402
 from sail_analyzer import results as RS                     # noqa: E402
 from sail_analyzer.entities.course import TEMPLATES, normalize_course, parse_legs, template_course  # noqa: E402,F401
-from sail_analyzer.entities.start import gun_from_clock     # noqa: E402
+from sail_analyzer.use_cases.analyse_race import AnalyseRace, RaceRequest  # noqa: E402
+from sail_analyzer.use_cases.errors import AnalysisError, TransientError  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.dirname(HERE)               # the folder with 01_Prueba 1 ...
@@ -101,349 +102,86 @@ def clean_text(s, n=80):
     return re.sub(r"[<>\"`\x00-\x1f]", "", str(s or "")).strip()[:n]
 
 
-def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
-    tracks = []
-    for f in list_kml(race_dir):
-        base = clean_text(os.path.basename(f)[:-4], 120)
-        try:
-            t, la, lo = R.parse_kml(f)
-        except ET.ParseError as e:                # truncated / not-KML file: skip that boat
-            print(f"  ! skipping {os.path.basename(f)}: {e}", flush=True)
-            continue
-        if len(t) >= 30:
-            tracks.append((f, base, t, la, lo))
-    # boat id = sail number (TracTrac "206341-O_NAME"); when that isn't unique in
-    # this folder (other naming schemes) the whole file name is the id
-    first = [base.split("-")[0] for _, base, *_ in tracks]
-    boats, used = [], set()
-    for (f, base, t, la, lo), sail in zip(tracks, first):
-        sid = sail if first.count(sail) == 1 else base
-        k = 2
-        while sid in used:
-            sid, k = f"{base}~{k}", k + 1
-        used.add(sid)
-        disp = base.split("_", 1)[-1] if "_" in base else base
-        boats.append(R.Boat(sail=sid, name=disp, file=f, t=t, lat=la, lon=lo))
-    if not boats:
-        return None
+class KmlTrackGateway:
+    """TrackGateway over a folder of TracTrac KML files (moves to the interface adapters in step 4)."""
 
-    lat0 = float(np.mean([b.lat.mean() for b in boats]))
-    lon0 = float(np.mean([b.lon.mean() for b in boats]))
-    for b in boats:
-        R.derive_kinematics(b, lat0, lon0)
+    def boats(self, tracks_dir):
+        tracks = []
+        for f in list_kml(tracks_dir):
+            base = clean_text(os.path.basename(f)[:-4], 120)
+            try:
+                t, la, lo = R.parse_kml(f)
+            except ET.ParseError as e:                # truncated / not-KML file: skip that boat
+                print(f"  ! skipping {os.path.basename(f)}: {e}", flush=True)
+                continue
+            if len(t) >= 30:
+                tracks.append((f, base, t, la, lo))
+        # boat id = sail number (TracTrac "206341-O_NAME"); when that isn't unique in
+        # this folder (other naming schemes) the whole file name is the id
+        first = [base.split("-")[0] for _, base, *_ in tracks]
+        boats, used = [], set()
+        for (f, base, t, la, lo), sail in zip(tracks, first):
+            sid = sail if first.count(sail) == 1 else base
+            k = 2
+            while sid in used:
+                sid, k = f"{base}~{k}", k + 1
+            used.add(sid)
+            disp = base.split("_", 1)[-1] if "_" in base else base
+            boats.append(R.Boat(sail=sid, name=disp, file=f, t=t, lat=la, lon=lo))
+        return boats
 
-    wind_from = R.estimate_wind_dir(boats)
-    for b in boats:
-        R.apply_wind(b, wind_from)
 
-    # common time grid (5 s)
-    t_start = min(b.t[0] for b in boats)
-    t_end = max(b.t[-1] for b in boats)
-    grid = np.arange(t_start, t_end + 1, 5.0)
+# decimals each race-summary value is shown with
+SUMMARY_DIGITS = {"race_min": 2, "dist_nm": 2, "sog_mean": 2, "sog_up": 2, "sog_dn": 2, "twa_up": 0,
+                  "twa_dn": 0, "vmg_up": 2, "vmg_dn": 2, "tack_loss": 2, "gybe_loss": 2}
 
-    wind_series = R.wind_timeseries(boats, wind_from, grid)
-    progress = R.fleet_progress(boats, wind_from, grid)
 
-    # The gun is a round clock-minute ~5 min after logging starts (logging begins
-    # at the warning signal; the first minutes are the pre-start). Leg 1 is
-    # anchored there so the pre-start is excluded from the race legs.
-    gun_t = (gun_from_clock(gun, float(np.median([b.t[0] for b in boats]))) if gun
-             else R.detect_gun(boats, wind_from))
-    if gun:
-        first, last = float(np.median([b.t[0] for b in boats])), max(float(b.t[-1]) for b in boats)
-        if not first - 1800 <= gun_t <= last - 300:
-            hm = lambda t: datetime.fromtimestamp(t, timezone.utc).strftime("%H:%M")
-            raise AnalysisError(f"Gun {gun} UTC is outside the tracks ({hm(first)}–{hm(last)} UTC).")
-    template = tuple(leg["type"] for leg in course)
-    seg = {b.sail: R.segment_legs(b, wind_from, template=template, gun_t=gun_t, with_index=True)
-           for b in boats}
-    legs_by_sail = {s: lg for s, (lg, _) in seg.items()}
-    # a boat "finished" if it sailed the full course (>= the fleet's modal leg count).
-    # Boats with fewer legs are retirees/DNF and are excluded from fleet metrics.
-    _lc = {}
-    for lg, ks in seg.values():
-        if ks is not None:                        # fallback up/down splits say nothing about the course
-            _lc[len(lg)] = _lc.get(len(lg), 0) + 1
-    # The course length the fleet sailed: the largest leg count held by >= 25% of the
-    # boats (so retirees can't outvote finishers); if the count one below is that common
-    # too, use it: one leg apart is a merged leg or post-finish sailing, not a retirement.
-    common = sorted((c for c in _lc if c > 0 and _lc[c] >= 0.25 * sum(_lc.values())), reverse=True)
-    mode_legs = common[0] if common else max((c for c in _lc if c > 0), key=_lc.get, default=0)
-    line_legs = mode_legs                         # finish line from boats that sailed the most legs
-    if mode_legs - 1 in common:
-        mode_legs -= 1
-    finished = {s: bool(lg) and ks is not None and len(lg) >= mode_legs   # fallback split: no course fit
-                for s, (lg, ks) in seg.items()}
-    # course leg of each boat leg: a finisher's DP template index; for a retiree (whose
-    # few legs the DP can stretch onto the last template legs) and for the fallback
-    # split, the n-th leg of a type = the course's n-th leg of that type
-    cix_by_sail = {s: (ks if ks is not None and finished[s] else R.course_index(course, lg))
-                   for s, (lg, ks) in seg.items()}
-
-    # ---- finish times by LINE CROSSING (not leg end, which drifts minutes) ----
-    # Finish line: through the fleet-median last-turn apex, perpendicular to the
-    # fleet-median final-leg direction. A boat finishes the first time its
-    # projection along that direction passes the apex. Same reference for all
-    # boats -> reliable finish ORDER (validated against official results).
-    apexes, fdirs = [], []
-    for b in boats:
-        lg = legs_by_sail[b.sail]
-        if not finished[b.sail] or len(lg) != line_legs:
-            continue
-        a, c, _ = lg[-1]
-        j = R._refine_turn(b, c)                    # sharpest turn ~ the line
-        apexes.append((b.x[j], b.y[j]))
-        dx, dy = b.x[c] - b.x[a], b.y[c] - b.y[a]
-        nn = float(np.hypot(dx, dy))
-        if nn > 1:
-            fdirs.append((dx / nn, dy / nn))
-    finish_t = {}
-    if len(apexes) >= 5 and fdirs:
-        Fx = float(np.median([q[0] for q in apexes])); Fy = float(np.median([q[1] for q in apexes]))
-        fux = float(np.median([v[0] for v in fdirs])); fuy = float(np.median([v[1] for v in fdirs]))
-        nn = float(np.hypot(fux, fuy)); fux /= nn; fuy /= nn
-    else:
-        Fx = None
-    for b in boats:
-        lg = legs_by_sail[b.sail]
-        if not lg:
-            continue
-        ft = float(b.t[lg[-1][1]])                 # no line crossing seen: end of its last leg
-        crossed = False
-        if Fx is not None and finished[b.sail]:
-            # search from the start of the leg where the fleet finishes (a boat can have
-            # extra legs) to the END OF TRACK: the leg-end trim can stop short of the line
-            a, c, k = lg[mode_legs - 1]
-            proj = (b.x[a:] - Fx) * fux + (b.y[a:] - Fy) * fuy
-            hit = np.where(proj >= 0)[0]
-            if len(hit):
-                ft, crossed = float(b.t[a + int(hit[0])]), True
-        finish_t[b.sail] = ft
-        # a finisher's legs beyond the fleet's count (a final leg the fleet's own fits
-        # merged, or post-finish sailing) merge into the fleet's last leg, which ends at the
-        # line when the crossing is seen, so every finisher's legs compare like for like
-        if finished[b.sail] and len(lg) > mode_legs:
-            a, c, k = lg[mode_legs - 1]
-            end = int(np.searchsorted(b.t, ft)) if crossed else lg[-1][1]
-            legs_by_sail[b.sail] = lg[:mode_legs - 1] + [(a, max(a + 1, min(end, len(b.t) - 1)), k)]
-            cix_by_sail[b.sail] = cix_by_sail[b.sail][:mode_legs]
-    # ...and every finisher's last leg is the fleet's final course leg (the fit can label the
-    # same physical final leg with different template legs, e.g. in a shortened race)
-    lasts = [cix_by_sail[s][-1] for s in legs_by_sail if finished[s] and cix_by_sail[s]]
-    fin_ci = max(set(lasts), key=lasts.count) if lasts else None
-    kind_of = {"U": "upwind", "R": "reach", "D": "downwind"}
-    for s in legs_by_sail:
-        cx = cix_by_sail[s]
-        if fin_ci is None or not finished[s] or not cx or cx[-1] == fin_ci:
-            continue
-        if len(cx) < 2 or (cx[-2] is not None and cx[-2] < fin_ci):
-            a, c, _ = legs_by_sail[s][-1]
-            legs_by_sail[s] = legs_by_sail[s][:-1] + [(a, c, kind_of[course[fin_ci]["type"]])]
-            cix_by_sail[s] = cx[:-1] + [fin_ci]
-
-    # course marks at the finishers' actual rounding points, labelled as in the course
-    ref = [b for b in boats if finished[b.sail]]
-    if len(ref) < 3:                              # tiny fleet / no course fit: use every boat
-        ref = boats
-    marks = R.detect_marks(ref, wind_from, legs_by_sail, course, cix_by_sail)
-
-    # start line at the gun, with its ends labelled: RC (committee boat, starboard
-    # end) and Pin (port end). Starboard = +along-line (wind_from + 90 deg).
-    start_t = float(gun_t)
-    startinfo = R.infer_start(boats, wind_from, start_t)
-    start_line = None
-    if startinfo:
-        s = startinfo
-        def xy_to_ll(px, py):
-            mlat = 111320.0; mlon = 111320.0 * np.cos(np.radians(lat0))
-            return [lat0 + py / mlat, lon0 + px / mlon]
-        pe1 = s["line_perp"]
-        pin = xy_to_ll(pe1 * s["ux"] + s["along_min"] * s["lx"],
-                       pe1 * s["uy"] + s["along_min"] * s["ly"])
-        rc = xy_to_ll(pe1 * s["ux"] + s["along_max"] * s["lx"],
-                      pe1 * s["uy"] + s["along_max"] * s["ly"])
-        start_line = [pin, rc]
-        marks.append({"label": "RC", "ll": rc})       # committee boat (starboard)
-        marks.append({"label": "Pin", "ll": pin})     # pin end (port)
-
-    # ---- mark-rounding times by PROXIMITY (first close approach to each buoy) ----
-    # Leg boundaries come from ~60s-smoothed VMG, so their times are far too noisy
-    # to order the fleet at a mark; the actual closest pass is sharp and reliable.
-    cosLat = float(np.cos(np.radians(lat0)))
-    def _ll_xy(ll):
-        return ((ll[1] - lon0) * 111320.0 * cosLat, (ll[0] - lat0) * 111320.0)
-    _mk = {}
-    for m in marks:
-        _mk.setdefault(m["label"], []).append(_ll_xy(m["ll"]))
-    seq_xy = [_mk.get(leg["mark"], []) for leg in course]           # targets per leg end
-    rounds_by_sail = {}
-    for b in boats:
-        lg = legs_by_sail[b.sail]
-        gi0 = int(np.argmin(np.abs(b.t - gun_t)))
-        rounds, k0 = [], gi0
-        for li in range(len(lg)):
-            ci = cix_by_sail[b.sail][li]
-            tgts = seq_xy[ci] if ci is not None else []
-            if not tgts or k0 >= len(b.t) - 2:
-                rounds.append(None); continue
-            dist = np.min(np.stack([np.hypot(b.x[k0:] - tx, b.y[k0:] - ty)
-                                    for tx, ty in tgts]), axis=0)
-            near = np.where(dist < 100.0)[0]
-            if len(near):
-                j = int(near[0])
-                while j + 1 < len(dist) and dist[j + 1] <= dist[j]:
-                    j += 1                                          # walk to the local apex
-            else:
-                j = int(np.argmin(dist))                            # never close: best pass
-            rounds.append(float(b.t[k0 + j])); k0 = k0 + j + 1
-        rounds_by_sail[b.sail] = rounds
-
-    # ---- finish line where the finishers' tracks converge (between the committee boat
-    # and the pin; they spread out again as they keep sailing). Boats crossing it get that
-    # finish time (a finisher passing just outside its ends: the line extended); without such a
-    # line (e.g. tracking stopped first) the estimate stays.
-    gps_finish = set()
-    pci = (len(course) - 2 if fin_ci >= len(course) - 2 else fin_ci - 1) if fin_ci is not None else None
-    if pci is not None and pci >= 0 and _mk.get(course[pci]["mark"]):
-        starts = {}
-        for b in boats:
-            li = next((i for i, c in enumerate(cix_by_sail[b.sail]) if c == pci), None)
-            if li is not None and rounds_by_sail[b.sail][li] is not None:
-                starts[b.sail] = rounds_by_sail[b.sail][li]
-            elif finished[b.sail] and legs_by_sail[b.sail] and cix_by_sail[b.sail] \
-                    and cix_by_sail[b.sail][-1] == fin_ci:      # no rounding pass seen: its final leg's start
-                starts[b.sail] = float(b.t[legs_by_sail[b.sail][-1][0]])
-        fins = [b for b in boats if finished[b.sail]]
-        if fins:
-            target = np.median([(b.x[legs_by_sail[b.sail][-1][1]], b.y[legs_by_sail[b.sail][-1][1]])
-                                for b in fins], axis=0)
-            conv = R.finish_by_convergence(boats, starts, np.mean(_mk[course[pci]["mark"]], axis=0),
-                                           target, {b.sail for b in fins})
-            # sanity: a real line is crossed no later than the previous estimate (which runs late,
-            # to the leg end); a course shortened at its last mark would put a "line" in
-            # post-finish sailing, i.e. clearly later
-            dt = [t - finish_t[s] for s, t in (conv or {}).get("times", {}).items()
-                  if s in finish_t and cix_by_sail[s] and cix_by_sail[s][-1] == fin_ci]
-            if conv and dt and float(np.median(dt)) <= 60.0:
-                for b in boats:
-                    lg, ft = legs_by_sail[b.sail], conv["times"].get(b.sail)
-                    if ft is None and finished[b.sail]:
-                        ft = conv["near"].get(b.sail)
-                    # only a boat that sailed the final leg finishes by crossing (a retiree
-                    # sailing home through the finish area doesn't)
-                    if ft is None or not lg or not cix_by_sail[b.sail] or cix_by_sail[b.sail][-1] != fin_ci:
-                        continue
-                    a, _c, k = lg[-1]                 # the last leg (and race window) ends at the line
-                    legs_by_sail[b.sail] = lg[:-1] + [(a, max(a + 1, min(int(np.searchsorted(b.t, ft)), len(b.t) - 1)), k)]
-                    rounds_by_sail[b.sail][-1] = ft
-                    finish_t[b.sail] = ft
-                    finished[b.sail] = True
-                    gps_finish.add(b.sail)
-                fl = course[-1]["mark"]
-                to_ll = lambda px, py: [lat0 + py / 111320.0, lon0 + px / (111320.0 * cosLat)]
-                marks = [m for m in marks if m["label"] != fl] + [{"label": fl, "ll": to_ll(*e)} for e in conv["ends"]]
-
-    # ---- tactical inputs: wind-shadow exposure (all boats) + penalty-turn candidates ----
-    shadow = R.dirty_air(boats, grid, wind_series)
-    penalties = {b.sail: R.detect_penalty_turns(b, gun_t + 20.0, finish_t.get(b.sail, float(b.t[-1])))
-                 for b in boats}
-
-    # fleet aggregate stats on the grid (FINISHERS only — exclude retirees/DNF)
-    ref = [b for b in boats if finished[b.sail]]  # incl. boats seen crossing the finish line
-    if len(ref) < 3:
-        ref = boats
-    sog_grid, vmg_grid = [], []
-    for b in ref:                                 # finishers (every boat if fewer than 3)
-        sog_grid.append(np.interp(grid, b.t, b.sog, left=np.nan, right=np.nan))
-        vmg_grid.append(np.interp(grid, b.t, b.vmg, left=np.nan, right=np.nan))
-    sog_grid = np.array(sog_grid); vmg_grid = np.array(vmg_grid)
-    with np.errstate(all="ignore"):
-        fleet_stats = {
-            "t": r0(grid),
-            "sog_p50": rnan(np.nanmedian(sog_grid, axis=0), 2),
-            "sog_p25": rnan(np.nanpercentile(sog_grid, 25, axis=0), 2),
-            "sog_p75": rnan(np.nanpercentile(sog_grid, 75, axis=0), 2),
-            "vmg_p50": rnan(np.nanmedian(vmg_grid, axis=0), 2),
-        }
-
+def present_race(a):
+    """The race analysis as the API's JSON: rounded values, boat colours (moves to the
+    interface adapters' presenters in step 4)."""
     boats_out = []
-    for i, b in enumerate(sorted(boats, key=lambda x: x.sail)):
-        mans = R.detect_maneuvers(b, wind_from)
-        legs = legs_by_sail[b.sail]
-        # RACE window only: gun -> finish (exclude pre-start and post-finish)
-        gi = int(np.argmin(np.abs(b.t - gun_t)))
-        fi = legs[-1][1] if legs else len(b.t) - 1
-        sl = slice(gi, fi + 1)
-        sog_s, twa_s, vmg_s = b.sog[sl], b.twa[sl], b.vmg[sl]
-        up = twa_s < 70; dn = twa_s > 110
-        dist_m = float(np.sum(np.hypot(np.diff(b.x[sl]), np.diff(b.y[sl]))))
-        mans = [m for m in mans if b.t[gi] <= m.t <= b.t[fi]]   # race maneuvers only
-        tacks = [m for m in mans if m.kind == "tack"]
-        gybes = [m for m in mans if m.kind == "gybe"]
-        summary = {
-            "n": int(fi - gi + 1),
-            "n_legs": len(legs), "finished": finished[b.sail], "gps_finish": b.sail in gps_finish,
-            "race_min": round(float(finish_t.get(b.sail, b.t[fi]) - gun_t) / 60.0, 2),
-            "dist_nm": round(dist_m / 1852.0, 2),
-            "sog_mean": round(float(sog_s.mean()), 2),
-            "sog_up": round(float(sog_s[up].mean()), 2) if up.any() else None,
-            "sog_dn": round(float(sog_s[dn].mean()), 2) if dn.any() else None,
-            "twa_up": round(float(np.median(twa_s[up])), 0) if up.any() else None,
-            "twa_dn": round(float(np.median(twa_s[dn])), 0) if dn.any() else None,
-            "vmg_up": round(float(vmg_s[up].mean()), 2) if up.any() else None,
-            "vmg_dn": round(float(-vmg_s[dn].mean()), 2) if dn.any() else None,
-            "n_tacks": len(tacks), "n_gybes": len(gybes),
-            "tack_loss": round(float(np.mean([m.bl_lost for m in tacks])), 2) if tacks else None,
-            "gybe_loss": round(float(np.mean([m.bl_lost for m in gybes])), 2) if gybes else None,
-        }
-        # cumulative made-good distance along each leg's OWN axis (handles
-        # upwind/reach/downwind uniformly) -> continuous position ladder
-        made = np.zeros(len(b.t)); acc = 0.0
-        for (a, c, kind) in legs:
-            axx, ayy = b.x[c] - b.x[a], b.y[c] - b.y[a]
-            nrm = float(np.hypot(axx, ayy))
-            if c <= a or nrm < 1.0:
-                made[a:] = acc; continue
-            axx, ayy = axx / nrm, ayy / nrm
-            seg = (b.x[a:c + 1] - b.x[a]) * axx + (b.y[a:c + 1] - b.y[a]) * ayy
-            made[a:c + 1] = acc + seg
-            acc += float(seg[-1])
-            made[c + 1:] = acc
-        course_grid = np.interp(grid, b.t, made, left=np.nan, right=np.nan)
-
-        prog = progress.get(b.sail)
+    for i, ba in enumerate(a.boats):
+        b = ba.boat
+        summary = {k: (round(v, SUMMARY_DIGITS[k]) if k in SUMMARY_DIGITS and v is not None else v)
+                   for k, v in ba.summary.items()}
         boats_out.append({
-            "rounds": [None if v is None else int(round(v)) for v in rounds_by_sail.get(b.sail, [])],
-            "shadow": shadow.get(b.sail, ""),
-            "penalties": penalties.get(b.sail, []),
-            "course": rnan(course_grid, 0),
+            "rounds": [None if v is None else int(round(v)) for v in ba.rounds],
+            "shadow": ba.shadow,
+            "penalties": ba.penalties,
+            "course": rnan(ba.course_grid, 0),
             "sail": b.sail, "name": b.name, "color": PALETTE[i % len(PALETTE)],
             "t": r0(b.t), "lat": r6(b.lat), "lon": r6(b.lon),
             "sog": r2(b.sog), "cog": r1(b.cog), "twa": r1(b.twa),
             "vmg": r2(b.vmg), "tack": [int(x) for x in b.tack],
-            "legs": [[int(a), int(c), kind] for (a, c, kind) in legs],
-            "course_ix": cix_by_sail[b.sail],
-            "maneuvers": [vars(m) for m in mans],
-            "progress": (rnan(prog, 1) if prog is not None else None),
+            "legs": [[int(i0), int(i1), kind] for (i0, i1, kind) in ba.legs],
+            "course_ix": ba.course_ix,
+            "maneuvers": [vars(m) for m in ba.maneuvers],
+            "progress": (rnan(ba.progress, 1) if ba.progress is not None else None),
             "summary": summary,
         })
-
     return {
-        "race": race_name,
-        "key": key or race_name,
-        "course": course,
-        "gun_manual": bool(gun),
-        "start_t": start_t,
-        "gun_t": float(gun_t),
-        "start_iso": datetime.fromtimestamp(start_t, timezone.utc).isoformat(),
-        "wind_from": round(float(wind_from), 0),
-        "lat0": lat0, "lon0": lon0,
-        "marks": marks,
-        "start_line": start_line,
-        "wind_series": {"t": r0(grid), "dir": r1(wind_series)},
-        "fleet_stats": fleet_stats,
+        "race": a.name,
+        "key": a.key,
+        "course": a.course,
+        "gun_manual": a.gun_manual,
+        "start_t": a.start_t,
+        "gun_t": a.gun_t,
+        "start_iso": datetime.fromtimestamp(a.start_t, timezone.utc).isoformat(),
+        "wind_from": round(float(a.wind_from), 0),
+        "lat0": a.lat0, "lon0": a.lon0,
+        "marks": a.marks,
+        "start_line": a.start_line,
+        "wind_series": {"t": r0(a.grid), "dir": r1(a.wind_series)},
+        "fleet_stats": {"t": r0(a.grid), **{k: rnan(v, 2) for k, v in a.fleet.items()}},
         "boats": boats_out,
     }
+
+
+def build_race(race_dir: str, race_name: str, course, gun=None, key=None):
+    """A race folder's analysis as the API's JSON (None when it has no usable tracks)."""
+    a = AnalyseRace(KmlTrackGateway()).execute(
+        RaceRequest(tracks_dir=race_dir, name=race_name, course=course, gun=gun, key=key))
+    return present_race(a) if a is not None else None
 
 
 # --------------------------------------------------------------------------- #
@@ -626,9 +364,32 @@ def normalize_gun(gun):
 # Cache: cache/<regatta>/<race>.json (+ .meta.json), cache/<regatta>/index.json
 # --------------------------------------------------------------------------- #
 # caches older than the code this process runs are rebuilt
-ANALYSIS_SOURCES = ([os.path.join(HERE, f) for f in ("app.py", "regatta.py")]   # the code a cached race comes from
-                    + glob.glob(os.path.join(glob.escape(HERE), "entities", "**", "*.py"), recursive=True))
-SRC_MTIME = max(os.path.getmtime(f) for f in ANALYSIS_SOURCES)
+def _package_sources(root, skip=(CACHE_DIR, UPLOAD_DIR, STATIC_DIR)):
+    """The package's Python files in every circle. The package's own cache/, data/ and static/
+    folders (generated analysis, uploaded tracks, the UI) aren't walked; dot-files (editor lock
+    files) and __pycache__ are left out."""
+    skip = {os.path.normcase(os.path.abspath(p)) for p in skip}
+    out = []
+    for d, sub, files in os.walk(root):
+        sub[:] = [x for x in sub if x != "__pycache__" and not x.startswith(".")
+                  and os.path.normcase(os.path.join(d, x)) not in skip]
+        out += [os.path.join(d, f) for f in files if f.endswith(".py") and not f.startswith(".")]
+    return out
+
+
+def _newest(paths):
+    """The newest modification time of the files that still exist."""
+    times = []
+    for f in paths:
+        try:
+            times.append(os.path.getmtime(f))
+        except OSError:                           # removed or a dangling link: not code we run
+            pass
+    return max(times)
+
+
+ANALYSIS_SOURCES = _package_sources(HERE)       # the code a cached race comes from
+SRC_MTIME = _newest(ANALYSIS_SOURCES)
 
 
 def race_cfg_hash(race):
@@ -684,14 +445,6 @@ def remove_file(path):
 def drop_race_cache(rid, race_id):
     for f in (race_cache_path(rid, race_id), _meta_path(rid, race_id)):
         remove_file(f)
-
-
-class AnalysisError(ValueError):
-    permanent = True                              # the same inputs would fail again
-
-
-class TransientError(AnalysisError):
-    permanent = False                             # e.g. a file locked by antivirus / sync
 
 
 def _mtime(path):

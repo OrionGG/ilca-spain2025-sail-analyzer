@@ -3,6 +3,10 @@
 Entities (sail_analyzer/entities): the enterprise business rules. They import only pure
 stdlib modules, numpy and each other: no files, network, HTTP, clock, threads or UI, and
 they don't reach outwards (use cases, adapters, app).
+
+Use cases (sail_analyzer/use_cases): the application business rules. They import only the
+entities, each other, pure stdlib modules and numpy, and do no I/O: the outside world comes
+in through the gateway interfaces they declare.
 """
 
 import ast
@@ -13,6 +17,7 @@ import unittest
 from tests import support
 
 ENTITIES = os.path.join(support.PKG, "entities")
+USE_CASES = os.path.join(support.PKG, "use_cases")
 PURE_STDLIB = {"__future__", "math", "re", "typing", "dataclasses", "datetime", "functools", "itertools",
                "collections", "enum", "statistics"}
 THIRD_PARTY = {"numpy"}
@@ -38,6 +43,20 @@ def entity_may_import(what):
         return not what.startswith("..")
     return what.split(".")[0] in PURE_STDLIB | THIRD_PARTY or what == "sail_analyzer.entities" \
         or what.startswith("sail_analyzer.entities.")
+
+
+def use_case_may_import(what):
+    """Another use-case module (relative, same package), an entity, or a pure stdlib module / numpy."""
+    if what.startswith("."):
+        return not what.startswith("..")
+    return entity_may_import(what) or what == "sail_analyzer.use_cases" \
+        or what.startswith("sail_analyzer.use_cases.")
+
+
+def layer_files(test, root, name):
+    files = sorted(glob.glob(os.path.join(glob.escape(root), "**", "*.py"), recursive=True))
+    test.assertTrue(files, f"no {name} found")
+    return files
 
 
 def side_effects(tree):
@@ -90,6 +109,63 @@ class EntitiesArePure(unittest.TestCase):
                         "datetime.now()\nnp.mean(a)\n")
         self.assertEqual(sorted(c for _l, c in side_effects(bad)),
                          sorted(["import load", "open()", "print()", ".load()", ".tofile()", ".now()"]))
+
+
+class UseCasesDependOnEntitiesOnly(unittest.TestCase):
+    def files(self):
+        return layer_files(self, USE_CASES, "use cases")
+
+    def test_imports_point_inwards_only(self):
+        for path in self.files():
+            for line, what in imports(parse(path)):
+                self.assertTrue(use_case_may_import(what),
+                                f"use_cases/{os.path.basename(path)}:{line} imports {what!r} "
+                                "(use cases depend only on entities and their own interfaces)")
+
+    def test_no_side_effects(self):
+        for path in self.files():
+            found = list(side_effects(parse(path)))
+            self.assertFalse(found, f"use_cases/{os.path.basename(path)} does I/O: {found}")
+
+    def test_the_rule_itself(self):
+        for ok in (".errors", ".gateways", "sail_analyzer.entities.track", "sail_analyzer.use_cases.errors",
+                   "numpy", "typing", "dataclasses", "datetime"):
+            self.assertTrue(use_case_may_import(ok), ok)
+        for bad in ("sail_analyzer.app", "sail_analyzer.regatta", "sail_analyzer.results", "..app",
+                    "sail_analyzer.interface_adapters.presenters", "sail_analyzer.use_cases_io",
+                    "os", "json", "http.server", "urllib.request", "threading", "xml.etree.ElementTree"):
+            self.assertFalse(use_case_may_import(bad), bad)
+
+
+class CacheStaleness(unittest.TestCase):
+    """Cached races are rebuilt when the code they come from changes: that has to cover every
+    circle the analysis code lives in, wherever later steps move it."""
+
+    def test_sources_cover_every_circle(self):
+        from sail_analyzer import app as A
+        want = {os.path.normcase(f) for f in glob.glob(os.path.join(glob.escape(support.PKG), "**", "*.py"),
+                                                        recursive=True)
+                if not os.path.basename(f).startswith(".")}
+        got = {os.path.normcase(f) for f in A.ANALYSIS_SOURCES}
+        self.assertEqual(sorted(want - got), [], "package code not counted for cache staleness")
+        for d in ("entities", "use_cases"):
+            self.assertTrue(any(os.sep + d + os.sep in f for f in got), d)
+
+    def test_walk_skips_only_the_package_data_folders(self):
+        import shutil
+        import tempfile
+        from sail_analyzer import app as A
+        root = tempfile.mkdtemp(prefix="sa_src_")
+        self.addCleanup(shutil.rmtree, root, True)
+        for rel in ("a.py", "x/data/b.py", "x/static/c.py", "x/cache/d.py", "data/e.py", "cache/f.py",
+                    "static/g.py", ".#lock.py", "x/__pycache__/h.py", "x/notes.txt"):
+            os.makedirs(os.path.dirname(os.path.join(root, rel)) or root, exist_ok=True)
+            open(os.path.join(root, rel), "w").close()
+        skip = [os.path.join(root, d) for d in ("cache", "data", "static")]
+        found = sorted(os.path.relpath(f, root).replace(os.sep, "/") for f in A._package_sources(root, skip))
+        self.assertEqual(found, ["a.py", "x/cache/d.py", "x/data/b.py", "x/static/c.py"])
+        self.assertEqual(A._newest([os.path.join(root, "a.py"), os.path.join(root, "gone.py")]),
+                         os.path.getmtime(os.path.join(root, "a.py")))
 
 
 class PackageEntryPoints(unittest.TestCase):
