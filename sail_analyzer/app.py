@@ -57,7 +57,6 @@ from sail_analyzer.use_cases.manage_races import ManageRaces  # noqa: E402
 from sail_analyzer.use_cases.manage_regattas import ManageRegattas  # noqa: E402
 from sail_analyzer.use_cases.official_results import OfficialResults  # noqa: E402
 from sail_analyzer.use_cases.race_analyses import RaceAnalyses, index_entry  # noqa: E402,F401
-from sail_analyzer.use_cases.registry import find_regatta  # noqa: E402
 from sail_analyzer.use_cases.registry import race_num as _race_num, slug as _slug  # noqa: E402,F401
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -699,7 +698,7 @@ class Handler(BaseHTTPRequestHandler):
         if parts == ["api", "regattas"]:                                   # create regatta
             return self._json({"ok": True, "id": REGATTAS.create(clean_text(body.get("name"), 80))})
         rid = parts[2] if len(parts) > 2 else ""
-        if not _safe_id(rid) or find_regatta(load_registry(), rid) is None:
+        if not _safe_id(rid):
             return self._err("unknown regatta", 404)
         if parts[3:] == ["results"]:                                      # download official results
             n, columns = RESULTS.download(rid, str(body.get("url", "")).strip())

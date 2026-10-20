@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from sail_analyzer.entities.course import TEMPLATES, parse_legs
 
-from .errors import NotFound
 from .gateways import AnalysisCache, RegattaLocks, RegattaRepository, TrackFolders, TrackGateway
-from .registry import find_regatta, slug
+from .registry import find_regatta, regatta_of, slug
 
 
 class ManageRegattas:
@@ -49,9 +48,7 @@ class ManageRegattas:
 
     def rename(self, rid, name):
         def rename(reg):
-            g = find_regatta(reg, rid)
-            if g is None:
-                raise NotFound("unknown regatta")
+            g = regatta_of(reg, rid)
             if not name:
                 raise ValueError("Give the regatta a name.")
             g["name"] = name
@@ -59,9 +56,9 @@ class ManageRegattas:
 
     def delete(self, rid):
         """The regatta, its races' uploaded tracks and its cached analyses."""
+        regatta_of(self.repo.load(), rid)             # an unknown regatta takes no lock
         with self.locks.regatta(rid):
-            if find_regatta(self.repo.load(), rid) is None:
-                raise NotFound("unknown regatta")
+            regatta_of(self.repo.load(), rid)
             self.repo.edit(lambda reg: reg.update(regattas=[g for g in reg["regattas"] if g["id"] != rid]))
             self.folders.delete_regatta(rid)          # app-made copies/caches only
             self.cache.drop_regatta(rid)

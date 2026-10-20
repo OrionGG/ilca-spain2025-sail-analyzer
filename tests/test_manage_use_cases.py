@@ -346,7 +346,7 @@ class ManageRegattasTest(unittest.TestCase):
             w.regattas.delete("nope")
         w.regattas.delete("copa")
         self.assertEqual(w.repo.reg["regattas"], [])
-        self.assertEqual(w.locks.taken, ["nope", "copa"])
+        self.assertEqual(w.locks.taken, ["copa"])                         # an unknown regatta takes no lock
         self.assertIn(("delete_regatta", "copa"), w.folders.log)
         self.assertIn(("drop_regatta", "copa"), w.cache.log)
 
@@ -378,7 +378,7 @@ class ManageRacesTest(unittest.TestCase):
         w.races.delete("copa", "r03")
         self.assertEqual(w.races.create("copa", "Final", REACH, "12:05"), "r04")
         self.assertEqual((w.stored("r04")["name"], w.stored("r04")["gun"]), ("Final", "12:05"))
-        self.assertEqual(w.locks.taken, ["nope", "copa", "copa", "copa"])
+        self.assertEqual(w.locks.taken, ["copa", "copa", "copa"])         # an unknown regatta takes no lock
 
     def test_update_name_only(self):
         w = self.w
@@ -433,6 +433,30 @@ class ManageRacesTest(unittest.TestCase):
         self.assertEqual(w.analysis.requests, [])
         w.races.update("copa", "r02", "", [{"type": "upwind", "mark": " 1 "}, {"type": "d", "mark": "F"}], " 12:00 ")
         self.assertEqual((w.stored("r02")["course"], w.stored("r02")["gun"]), (UP, "12:00"))   # normalized
+
+    def test_unknown_ids_take_no_lock(self):
+        w = self.w
+        for rid, race_id in (("nope", "r01"), ("copa", "r09")):
+            for action in (lambda: w.races.update(rid, race_id, "", UP, None), lambda: w.races.stage(rid, race_id),
+                           lambda: w.races.unstage(rid, race_id), lambda: w.races.commit(rid, race_id),
+                           lambda: w.races.delete(rid, race_id)):
+                with self.assertRaises(NotFound):
+                    action()
+        self.assertEqual(w.locks.taken, [])
+        with self.assertRaisesRegex(NotFound, "unknown regatta"):
+            w.races.upload("nope", "r01", "a.kml", b"")
+
+    def test_a_race_deleted_while_waiting_for_the_lock(self):
+        w = self.w
+        regatta = w.locks.regatta
+
+        def delete_first(rid):                              # another request deletes r01 meanwhile
+            w.repo.regatta("copa")["races"] = [r for r in w.repo.regatta("copa")["races"] if r["id"] != "r01"]
+            return regatta(rid)
+        w.locks.regatta = delete_first
+        with self.assertRaises(NotFound):
+            w.races.stage("copa", "r01")
+        self.assertEqual(w.folders.log, [])
 
     def test_upload_and_staging(self):
         w = self.w

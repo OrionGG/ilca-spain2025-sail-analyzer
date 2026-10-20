@@ -52,7 +52,7 @@ class RaceAnalyses:
         """Cache first, registry last: if either write fails the registry still has the old
         config, and a cache made for a config the registry doesn't have is just stale."""
         self._store(rid, race, data, cfg)
-        put_race(self.repo, rid, race["id"], race)
+        self.repo.edit(lambda reg: put_race(reg, rid, race["id"], race))
 
     def cached(self, rid, race, force=False):
         """(Re)build one race's cache when missing/stale. Returns an error string or

@@ -19,7 +19,7 @@ from tests import support
 ENTITIES = os.path.join(support.PKG, "entities")
 USE_CASES = os.path.join(support.PKG, "use_cases")
 PURE_STDLIB = {"__future__", "math", "re", "typing", "dataclasses", "datetime", "functools", "itertools",
-               "collections", "enum", "statistics"}
+               "collections", "enum", "statistics", "contextlib"}
 THIRD_PARTY = {"numpy"}
 SIDE_EFFECT_CALLS = {"open", "print", "input", "exec", "eval", "__import__", "breakpoint"}
 # I/O and clock reached through an allowed module: np.load(...), arr.tofile(...), datetime.now()
