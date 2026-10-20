@@ -3,7 +3,7 @@
 import unittest
 
 from tests import support  # noqa: F401
-import app as A
+from sail_analyzer import app as A
 
 
 def leg(t, m, gate=False):

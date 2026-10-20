@@ -3,8 +3,8 @@
 import http.client
 import unittest
 
-from tests import support  # noqa: F401  (puts the app's modules on sys.path)
-import results as RS
+from tests import support  # noqa: F401  (puts the package on sys.path)
+from sail_analyzer import results as RS
 
 
 def S(pts, code=None, disc=False):

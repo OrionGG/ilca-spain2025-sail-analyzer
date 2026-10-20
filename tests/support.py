@@ -1,4 +1,5 @@
-"""Shared test helpers: import the app's modules the way the app does (its folder on sys.path)."""
+"""Shared test helpers. The app's modules are imported through the package
+(`from sail_analyzer import app`), the way the app itself imports them."""
 
 import os
 import sys
@@ -8,8 +9,8 @@ PKG = os.path.join(ROOT, "sail_analyzer")
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden")
 
-if PKG not in sys.path:
-    sys.path.insert(0, PKG)
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
 
 def fixture(name):

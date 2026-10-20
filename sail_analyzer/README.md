@@ -77,7 +77,9 @@ stopped before the finish) the previous estimate is used. Downloaded official re
 
 ## Files
 - `app.py` – local HTTP server, regatta registry + upload API, cache builder (stdlib only).
-- `regatta.py` – the analytics engine (parsing, wind, VMG, maneuvers, legs, marks, start, finish).
+- `entities/` – the sailing rules, pure (no files, network or UI): wind, kinematics, maneuvers,
+  legs, marks and gates, start, finish, fleet, course templates.
+- `regatta.py` – the KML track reader, plus the entities' old names (being phased out, #6).
 - `results.py` – official-results download + parser (Sailti / HTML results tables).
 - `static/` – the offline single-page UI (no CDN); `manage.js` = Regattas manager.
 - `cache/` – generated per-race JSON (rebuilt automatically when stale).

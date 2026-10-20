@@ -128,7 +128,10 @@ approximate — the relative comparisons are the trustworthy part.
 ```
 sail_analyzer/
   app.py            local HTTP server, regatta/race registry + upload API, cache builder
-  regatta.py        analytics engine (parsing, wind, VMG, maneuvers, legs, marks, start)
+                    (`python sail_analyzer/app.py` or `python -m sail_analyzer`)
+  entities/         sailing rules (pure): wind, kinematics, maneuvers, legs, marks/gates,
+                    start, finish, fleet, course templates — see the refactor in #6
+  regatta.py        KML track reader + the old names of the entities (being phased out)
   static/           offline single-page UI (no CDN); manage.js = Regattas manager
   cache/            generated per-race JSON (gitignored; rebuilt when stale)
   data/             uploaded KML copies of your own races (gitignored)
