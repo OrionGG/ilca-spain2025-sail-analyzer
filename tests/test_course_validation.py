@@ -4,6 +4,7 @@ import unittest
 
 from tests import support  # noqa: F401
 from sail_analyzer import app as A
+from sail_analyzer.use_cases.race_config import normalize_gun, race_config
 
 
 def leg(t, m, gate=False):
@@ -44,19 +45,19 @@ class Course(unittest.TestCase):
 
 class Gun(unittest.TestCase):
     def test_formats(self):
-        self.assertIsNone(A.normalize_gun(None))
-        self.assertIsNone(A.normalize_gun("  "))
-        self.assertEqual(A.normalize_gun("12:05"), "12:05")
-        self.assertEqual(A.normalize_gun("9:05:30"), "9:05:30")
+        self.assertIsNone(normalize_gun(None))
+        self.assertIsNone(normalize_gun("  "))
+        self.assertEqual(normalize_gun("12:05"), "12:05")
+        self.assertEqual(normalize_gun("9:05:30"), "9:05:30")
         for bad in ("12", "12:5", "24:00", "12:60", "12:00:61", "noon", 1205):
             with self.assertRaises(ValueError, msg=bad):
-                A.normalize_gun(bad)
+                normalize_gun(bad)
 
     def test_course_not_starting_upwind_needs_a_gun(self):
-        body = {"course": [leg("D", "1"), leg("U", "F")]}
+        course = [leg("D", "1"), leg("U", "F")]
         with self.assertRaisesRegex(ValueError, "gun time"):
-            A.course_and_gun(body)
-        self.assertEqual(A.course_and_gun({**body, "gun": "12:00"})[1], "12:00")
+            race_config(course, None)
+        self.assertEqual(race_config(course, "12:00")[1], "12:00")
 
 
 class Names(unittest.TestCase):

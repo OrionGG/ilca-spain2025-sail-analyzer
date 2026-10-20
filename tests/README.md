@@ -21,6 +21,9 @@ races twice: directly, and through the cache the API serves.
 | `test_routes.py` | The HTTP API end to end. A real server runs on a temporary registry, data and cache folder: the request guard, static files, the lifecycle of regattas and races (staged upload of 8 real tracks, analysed commit, update, delete) and the official-results routes. |
 | `test_gate_split.py` | Gate marks: one or two buoys, stray roundings, small fleets. |
 | `test_course_validation.py` | Course, gun and name validation, and the course templates. |
+| `test_use_cases.py` | The race-analysis interactor (`AnalyseRace`) through a fake track gateway: its response model and the gateway contract. |
+| `test_manage_use_cases.py` | The regatta / race / official-results interactors through in-memory fake gateways: cache states and rebuilds, the regatta index, ids never reused, analysis before saving, the staged-tracks swap and its undo, the results-column mapping. |
+| `test_architecture.py` | The dependency rule: entities and use cases import only inwards and do no I/O (use cases reach the outside world only through the gateways they are given). |
 
 ## Regenerating the analysis references
 
