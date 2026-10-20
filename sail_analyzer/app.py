@@ -51,7 +51,7 @@ if __package__ in (None, "") and "sail_analyzer" not in sys.modules:
 from sail_analyzer import regatta as R                      # noqa: E402
 from sail_analyzer import results as RS                     # noqa: E402
 from sail_analyzer.entities.course import TEMPLATES, normalize_course, parse_legs, template_course  # noqa: E402,F401
-from sail_analyzer.use_cases.analyse_race import SUMMARY_DIGITS, AnalyseRace, RaceRequest  # noqa: E402
+from sail_analyzer.use_cases.analyse_race import AnalyseRace, RaceRequest  # noqa: E402
 from sail_analyzer.use_cases.errors import AnalysisError, TransientError  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -129,6 +129,11 @@ class KmlTrackGateway:
             disp = base.split("_", 1)[-1] if "_" in base else base
             boats.append(R.Boat(sail=sid, name=disp, file=f, t=t, lat=la, lon=lo))
         return boats
+
+
+# decimals each race-summary value is shown with
+SUMMARY_DIGITS = {"race_min": 2, "dist_nm": 2, "sog_mean": 2, "sog_up": 2, "sog_dn": 2, "twa_up": 0,
+                  "twa_dn": 0, "vmg_up": 2, "vmg_dn": 2, "tack_loss": 2, "gybe_loss": 2}
 
 
 def present_race(a):
@@ -359,9 +364,17 @@ def normalize_gun(gun):
 # Cache: cache/<regatta>/<race>.json (+ .meta.json), cache/<regatta>/index.json
 # --------------------------------------------------------------------------- #
 # caches older than the code this process runs are rebuilt
-ANALYSIS_SOURCES = ([os.path.join(HERE, f) for f in ("app.py", "regatta.py")]   # the code a cached race comes from
-                    + [f for d in ("entities", "use_cases")
-                       for f in glob.glob(os.path.join(glob.escape(HERE), d, "**", "*.py"), recursive=True)])
+def _package_sources(root):
+    """The package's Python files in every circle; the cache/, data/ and static/ folders
+    (generated analysis, uploaded tracks, the UI) aren't walked."""
+    out = []
+    for d, sub, files in os.walk(root):
+        sub[:] = [x for x in sub if x not in ("cache", "data", "static", "__pycache__")]
+        out += [os.path.join(d, f) for f in files if f.endswith(".py")]
+    return out
+
+
+ANALYSIS_SOURCES = _package_sources(HERE)       # the code a cached race comes from
 SRC_MTIME = max(os.path.getmtime(f) for f in ANALYSIS_SOURCES)
 
 

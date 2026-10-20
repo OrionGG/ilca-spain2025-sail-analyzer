@@ -52,7 +52,7 @@ class BoatAnalysis:
     shadow: str                   # dirty-air exposure on the time grid
     course_grid: np.ndarray       # cumulative made-good distance on the time grid
     progress: np.ndarray | None
-    summary: dict                 # race summary, unrounded (see SUMMARY_DIGITS)
+    summary: dict                 # race summary, unrounded
 
 
 @dataclass
@@ -74,11 +74,6 @@ class RaceAnalysis:
     boats: list                   # BoatAnalysis, by sail
 
 
-# decimals each summary value is shown with (the presenter rounds; the use case doesn't)
-SUMMARY_DIGITS = {"race_min": 2, "dist_nm": 2, "sog_mean": 2, "sog_up": 2, "sog_dn": 2, "twa_up": 0,
-                  "twa_dn": 0, "vmg_up": 2, "vmg_dn": 2, "tack_loss": 2, "gybe_loss": 2}
-
-
 # --------------------------------------------------------------------------- #
 # The interactor
 # --------------------------------------------------------------------------- #
@@ -91,6 +86,10 @@ class AnalyseRace:
         boats = self.tracks.boats(req.tracks_dir)
         if not boats:
             return None
+        if any(b.x is not None for b in boats):          # derived into below: must be fresh entities
+            raise ValueError("TrackGateway returned boats that were already analysed (return fresh ones).")
+        if len({b.sail for b in boats}) != len(boats):
+            raise ValueError("TrackGateway returned boats with the same sail id.")
         course = req.course
         lat0, lon0 = _kinematics(boats)
         wind_from = estimate_wind_dir(boats)

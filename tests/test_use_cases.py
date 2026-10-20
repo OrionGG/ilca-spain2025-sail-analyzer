@@ -7,7 +7,7 @@ import unittest
 from tests import support
 from sail_analyzer import regatta as R
 from sail_analyzer.entities.track import Boat
-from sail_analyzer.use_cases.analyse_race import SUMMARY_DIGITS, AnalyseRace, BoatAnalysis, RaceAnalysis, RaceRequest
+from sail_analyzer.use_cases.analyse_race import AnalyseRace, BoatAnalysis, RaceAnalysis, RaceRequest
 from sail_analyzer.use_cases.errors import AnalysisError
 
 RACE1 = os.path.join(support.ROOT, "01_Prueba 1")
@@ -62,7 +62,9 @@ class AnalyseRaceTest(unittest.TestCase):
             self.assertEqual(len(ba.course_ix), len(ba.legs))
             self.assertEqual(len(ba.rounds), len(ba.legs))
             self.assertEqual(len(ba.course_grid), len(a.grid))
-            self.assertTrue(set(SUMMARY_DIGITS) <= set(ba.summary))
+            self.assertTrue({"race_min", "dist_nm", "sog_mean", "sog_up", "sog_dn", "twa_up", "twa_dn", "vmg_up",
+                             "vmg_dn", "n_tacks", "n_gybes", "tack_loss", "gybe_loss", "finished", "gps_finish"}
+                            <= set(ba.summary))
         # unrounded: rounding is the presenter's job
         self.assertTrue(any(round(ba.summary["race_min"], 2) != ba.summary["race_min"] for ba in a.boats))
 
@@ -72,6 +74,18 @@ class AnalyseRaceTest(unittest.TestCase):
         hhmm = datetime.datetime.fromtimestamp(auto.gun_t, datetime.timezone.utc).strftime("%H:%M")
         _gw, a = self.run_it(race1_tracks(), gun=hhmm, key="regatta/r01/abc")
         self.assertEqual((a.key, a.gun_manual, a.gun_t), ("regatta/r01/abc", True, auto.gun_t))
+
+    def test_gateway_contract_is_checked(self):
+        """Boats must come fresh (the analysis derives into them) and with unique sail ids."""
+        gw = FakeTracks(race1_tracks())
+        used = gw.boats("x")
+        used[0].x = used[0].lat                      # already analysed
+        gw.boats = lambda d: used
+        with self.assertRaisesRegex(ValueError, "already analysed"):
+            AnalyseRace(gw).execute(RaceRequest(tracks_dir="d", name="R", course=TRAP))
+        dup = FakeTracks(race1_tracks()[:2] + race1_tracks()[:1])
+        with self.assertRaisesRegex(ValueError, "same sail id"):
+            AnalyseRace(dup).execute(RaceRequest(tracks_dir="d", name="R", course=TRAP))
 
     def test_gun_outside_the_tracks(self):
         with self.assertRaisesRegex(AnalysisError, "outside the tracks"):

@@ -10,6 +10,7 @@ from sail_analyzer.entities.track import Boat
 
 class TrackGateway(Protocol):
     def boats(self, tracks_dir: str) -> list[Boat]:
-        """The usable boat tracks of a race's tracks folder, each with a unique sail id,
-        in the folder's order (empty when there are none)."""
+        """The usable boat tracks of a race's tracks folder, in the folder's order (empty when
+        there are none). Each call returns FRESH Boat entities (positions and times only): the
+        analysis derives kinematics and wind into them. Sail ids are unique within the race."""
         ...
