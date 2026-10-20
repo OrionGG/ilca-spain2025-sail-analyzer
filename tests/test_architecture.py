@@ -106,23 +106,28 @@ class PackageEntryPoints(unittest.TestCase):
                                     "assert callable(g['main'])\n")
 
     def test_folder_mode(self):
-        """`python sail_analyzer` (the folder) runs __main__.py, which loads the package the same way."""
-        self.run_fresh(support.ROOT, "runpy.run_path('sail_analyzer', run_name='folder_check')\n"
-                                     "assert 'sail_analyzer.app' in sys.modules\n")
+        """`python sail_analyzer` (the folder) runs __main__.py, which loads the package the same way.
+        Run from a folder that doesn't contain the package, so only __main__.py's loader can find it."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as elsewhere:
+            self.run_fresh(elsewhere, f"runpy.run_path({support.PKG!r}, run_name='folder_check')\n"
+                                      "assert 'sail_analyzer.app' in sys.modules\n")
 
     def run_fresh(self, cwd, body):
-        """Run `body` in a fresh interpreter from `cwd` (no PYTHONPATH): the package must come from
-        this checkout's folder, without sys.path being changed for it."""
+        """Run `body` in a fresh interpreter from `cwd` (no PYTHONPATH), where the package is not
+        importable by itself: it must come from this checkout's folder, with sys.path unchanged."""
         import subprocess
         import sys
         code = ("import os, runpy, sys\n"
+                "assert not any(os.path.isdir(os.path.join(p or os.getcwd(), 'sail_analyzer')) for p in sys.path), "
+                "'the package is importable without the loader: the check would prove nothing'\n"
                 "before = list(sys.path)\n"
                 + body +
                 "import sail_analyzer\n"
                 "assert 'sail_analyzer.entities.course' in sys.modules\n"
                 f"assert [os.path.normcase(p) for p in sail_analyzer.__path__] == [os.path.normcase({support.PKG!r})], "
                 "sail_analyzer.__path__\n"
-                "assert [p for p in sys.path if p not in before] == [] or sys.path[1:] == before[1:], sys.path\n"
+                "assert sys.path == before, ('sys.path changed', before, sys.path)\n"
                 "print('ok')\n")
         env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
         r = subprocess.run([sys.executable, "-c", code], cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
