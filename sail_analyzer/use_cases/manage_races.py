@@ -2,7 +2,8 @@
 (staged, analysed, then swapped in), delete it.
 
 A race's tracks or config change only once the new analysis succeeded; a new course or new
-tracks get a new marks key (hand-placed marks made for the old ones don't apply).
+tracks get a new marks key (hand-placed marks made for the old ones don't apply). Course and gun
+come as the request gives them and are validated once the race is found.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 from .errors import NotFound
 from .gateways import AnalysisCache, MarksKeys, RegattaLocks, RegattaRepository, TrackFolders, TrackGateway
 from .race_analyses import RaceAnalyses
+from .race_config import race_config
 from .registry import find_race, find_regatta, put_race, race_num
 
 
@@ -33,6 +35,7 @@ class ManageRaces:
         with self.locks.regatta(rid):
             if find_regatta(self.repo.load(), rid) is None:
                 raise NotFound("unknown regatta")
+            course, gun = race_config(course, gun)
 
             def add(reg):
                 g = find_regatta(reg, rid)
@@ -52,6 +55,7 @@ class ManageRaces:
         name only patches the cached analysis. Returns the analysis error of that patch, or None."""
         with self.locks.regatta(rid):
             race = self._race(rid, race_id)
+            course, gun = race_config(course, gun)
             new = {**race, "course": course, "gun": gun, "name": name or race["name"]}
             if new["course"] != race["course"]:
                 new["key"] = self.keys.new(rid, race["id"])    # old hand-edited marks don't fit
@@ -94,6 +98,7 @@ class ManageRaces:
             new = {**race}
             if config is not None:
                 name, course, gun = config
+                course, gun = race_config(course, gun)
                 new.update(course=course, gun=gun, name=name or race["name"])
             new["key"] = self.keys.new(rid, race["id"])  # new tracks: old hand-edited marks don't apply
             data, cfg = self.analyses.analysed(new, st)   # raises -> the current tracks stay

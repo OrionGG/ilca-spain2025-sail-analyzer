@@ -407,6 +407,25 @@ class ManageRacesTest(unittest.TestCase):
         with self.assertRaises(NotFound):
             w.races.update("copa", "r09", "", UP, None)
 
+    def test_course_and_gun_are_validated_once_the_race_is_found(self):
+        w = self.w
+        bad = [{"type": "R", "mark": "1"}, {"type": "D", "mark": "F"}]     # no gun for a reaching start
+        with self.assertRaises(NotFound):
+            w.races.create("nope", "", bad, None)
+        with self.assertRaises(NotFound):
+            w.races.update("copa", "r09", "", bad, None)
+        with self.assertRaisesRegex(ValueError, "No uploaded"):        # staged tracks checked first
+            w.races.commit("copa", "r02", ("", bad, None))
+        for action in (lambda: w.races.create("copa", "", bad, None), lambda: w.races.update("copa", "r01", "", bad, None),
+                       lambda: w.races.commit("copa", "r01", ("", bad, None)),
+                       lambda: w.races.update("copa", "r01", "", UP, "25:00")):
+            with self.assertRaisesRegex(ValueError, "gun time|Gun time"):
+                action()
+        self.assertEqual(w.repo.edits, 0)
+        self.assertEqual(w.analysis.requests, [])
+        w.races.update("copa", "r02", "", [{"type": "upwind", "mark": " 1 "}, {"type": "d", "mark": "F"}], " 12:00 ")
+        self.assertEqual((w.stored("r02")["course"], w.stored("r02")["gun"]), (UP, "12:00"))   # normalized
+
     def test_upload_and_staging(self):
         w = self.w
         w.races.stage("copa", "r01")

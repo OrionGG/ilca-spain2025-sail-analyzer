@@ -310,29 +310,6 @@ def kml_files(race):
     return list_kml(race_dir_abs(race))
 
 
-def course_and_gun(body):
-    course, gun = normalize_course(body.get("course")), normalize_gun(body.get("gun"))
-    if course[0]["type"] != "U" and not gun:
-        raise ValueError("This course doesn't start upwind: enter the gun time "
-                         "(auto-detection looks for the fleet starting to beat).")
-    return course, gun
-
-
-def normalize_gun(gun):
-    if gun is not None and not isinstance(gun, str):
-        raise ValueError("Gun time must be HH:MM or HH:MM:SS (UTC).")
-    gun = (gun or "").strip()
-    if not gun:
-        return None
-    if not re.fullmatch(r"\d{1,2}:\d{2}(:\d{2})?", gun):
-        raise ValueError("Gun time must be HH:MM or HH:MM:SS (UTC).")
-    hms = [int(x) for x in gun.split(":")] + [0]
-    h, m, sec = hms[0], hms[1], hms[2]
-    if h > 23 or m > 59 or sec > 59:
-        raise ValueError("Gun time out of range.")
-    return gun
-
-
 # --------------------------------------------------------------------------- #
 # Cache: cache/<regatta>/<race>.json (+ .meta.json), cache/<regatta>/index.json
 # --------------------------------------------------------------------------- #
@@ -741,13 +718,13 @@ class Handler(BaseHTTPRequestHandler):
             REGATTAS.delete(rid)
             return self._json({"ok": True})
         if parts[3:] == ["races"]:                                         # create race
-            course, gun = course_and_gun(body)
-            return self._json({"ok": True, "id": RACES.create(rid, clean_text(body.get("name"), 60), course, gun)})
+            race_id = RACES.create(rid, clean_text(body.get("name"), 60), body.get("course"), body.get("gun"))
+            return self._json({"ok": True, "id": race_id})
         if len(parts) <= 5 or parts[3] != "race":
             return self._err("unknown race", 404)
         race_id, action = parts[4], parts[5]
         if action == "update":                    # name / course / gun; analysed before saving
-            err = RACES.update(rid, race_id, self._race_name(body), *course_and_gun(body))
+            err = RACES.update(rid, race_id, self._race_name(body), body.get("course"), body.get("gun"))
             return self._json({"ok": True, **({"warning": err} if err else {})})
         if action == "stage":                     # empty staging folder for a new set of tracks
             RACES.stage(rid, race_id)
@@ -756,7 +733,7 @@ class Handler(BaseHTTPRequestHandler):
             RACES.unstage(rid, race_id)
             return self._json({"ok": True})
         if action == "commit":                    # analyse the staged tracks, then swap them in
-            config = (self._race_name(body), *course_and_gun(body)) if "course" in body else None
+            config = (self._race_name(body), body.get("course"), body.get("gun")) if "course" in body else None
             RACES.commit(rid, race_id, config)
             return self._json({"ok": True})
         if action == "delete":

@@ -161,6 +161,11 @@ class Api(unittest.TestCase):
         data = self.json(f"/api/race/{rid}/{race_id}")
         self.assertEqual(data["course"], wing)
         self.assertNotEqual(data["key"], key)
+        reach = [{"type": "R", "mark": "1"}, {"type": "D", "mark": "F"}]           # invalid: no gun
+        self.assertEqual(self.json(f"/api/regatta/{rid}/race/r09/update", {"course": reach}, status=404)["error"],
+                         "unknown race")                                            # the race is looked up first
+        self.assertIn("gun time", self.json(f"/api/regatta/{rid}/race/{race_id}/update", {"course": reach},
+                                            status=400)["error"])
 
         # official results: download, column map, remove
         out = self.json(f"/api/regatta/{rid}/results", {"url": "https://example.org/results"})
