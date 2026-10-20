@@ -102,15 +102,30 @@ class PackageEntryPoints(unittest.TestCase):
         """The .bat runs `python app.py` inside sail_analyzer/ (and launch.json `python sail_analyzer/app.py`):
         app.py must make the package importable itself. Loaded in a fresh interpreter, without
         starting the server (not run as __main__)."""
+        self.run_fresh(support.PKG, "g = runpy.run_path('app.py', run_name='launcher_check')\n"
+                                    "assert callable(g['main'])\n")
+
+    def test_folder_mode(self):
+        """`python sail_analyzer` (the folder) runs __main__.py, which loads the package the same way."""
+        self.run_fresh(support.ROOT, "runpy.run_path('sail_analyzer', run_name='folder_check')\n"
+                                     "assert 'sail_analyzer.app' in sys.modules\n")
+
+    def run_fresh(self, cwd, body):
+        """Run `body` in a fresh interpreter from `cwd` (no PYTHONPATH): the package must come from
+        this checkout's folder, without sys.path being changed for it."""
         import subprocess
         import sys
-        code = ("import runpy, sys\n"
-                "assert not any(p and __import__('os').path.isdir(__import__('os').path.join(p, 'sail_analyzer')) "
-                "for p in sys.path), 'repo root already importable'\n"
-                "g = runpy.run_path('app.py', run_name='launcher_check')\n"
-                "assert callable(g['main']) and 'sail_analyzer.entities.course' in sys.modules\n"
+        code = ("import os, runpy, sys\n"
+                "before = list(sys.path)\n"
+                + body +
+                "import sail_analyzer\n"
+                "assert 'sail_analyzer.entities.course' in sys.modules\n"
+                f"assert [os.path.normcase(p) for p in sail_analyzer.__path__] == [os.path.normcase({support.PKG!r})], "
+                "sail_analyzer.__path__\n"
+                "assert [p for p in sys.path if p not in before] == [] or sys.path[1:] == before[1:], sys.path\n"
                 "print('ok')\n")
-        r = subprocess.run([sys.executable, "-c", code], cwd=support.PKG, capture_output=True, text=True, timeout=120)
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        r = subprocess.run([sys.executable, "-c", code], cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
         self.assertEqual((r.returncode, r.stdout.strip()), (0, "ok"), r.stderr[-2000:])
 
     def test_module_entry_point_runs_only_as_main(self):

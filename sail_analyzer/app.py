@@ -37,9 +37,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import numpy as np
 
-if __package__ in (None, ""):          # run as a script (python sail_analyzer/app.py, the .bat): the
-    # package's parent (the tracks folder) goes last, so nothing there shadows the stdlib
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if __package__ in (None, "") and "sail_analyzer" not in sys.modules:
+    # run as a script (python sail_analyzer/app.py, the .bat): load THIS checkout's package by its
+    # path. Nothing goes on sys.path, so nothing in the tracks folder shadows the stdlib and no
+    # other sail_analyzer on the path (another clone or worktree) can stand in for this one.
+    import importlib.util
+    _pkg = os.path.dirname(os.path.abspath(__file__))
+    _spec = importlib.util.spec_from_file_location("sail_analyzer", os.path.join(_pkg, "__init__.py"),
+                                                   submodule_search_locations=[_pkg])
+    sys.modules["sail_analyzer"] = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(sys.modules["sail_analyzer"])
 
 from sail_analyzer import regatta as R                      # noqa: E402
 from sail_analyzer import results as RS                     # noqa: E402
@@ -620,7 +627,7 @@ def normalize_gun(gun):
 # --------------------------------------------------------------------------- #
 # caches older than the code this process runs are rebuilt
 ANALYSIS_SOURCES = ([os.path.join(HERE, f) for f in ("app.py", "regatta.py")]   # the code a cached race comes from
-                    + glob.glob(os.path.join(glob.escape(HERE), "entities", "*.py")))
+                    + glob.glob(os.path.join(glob.escape(HERE), "entities", "**", "*.py"), recursive=True))
 SRC_MTIME = max(os.path.getmtime(f) for f in ANALYSIS_SOURCES)
 
 
