@@ -364,18 +364,32 @@ def normalize_gun(gun):
 # Cache: cache/<regatta>/<race>.json (+ .meta.json), cache/<regatta>/index.json
 # --------------------------------------------------------------------------- #
 # caches older than the code this process runs are rebuilt
-def _package_sources(root):
-    """The package's Python files in every circle; the cache/, data/ and static/ folders
-    (generated analysis, uploaded tracks, the UI) aren't walked."""
+def _package_sources(root, skip=(CACHE_DIR, UPLOAD_DIR, STATIC_DIR)):
+    """The package's Python files in every circle. The package's own cache/, data/ and static/
+    folders (generated analysis, uploaded tracks, the UI) aren't walked; dot-files (editor lock
+    files) and __pycache__ are left out."""
+    skip = {os.path.normcase(os.path.abspath(p)) for p in skip}
     out = []
     for d, sub, files in os.walk(root):
-        sub[:] = [x for x in sub if x not in ("cache", "data", "static", "__pycache__")]
-        out += [os.path.join(d, f) for f in files if f.endswith(".py")]
+        sub[:] = [x for x in sub if x != "__pycache__" and not x.startswith(".")
+                  and os.path.normcase(os.path.join(d, x)) not in skip]
+        out += [os.path.join(d, f) for f in files if f.endswith(".py") and not f.startswith(".")]
     return out
 
 
+def _newest(paths):
+    """The newest modification time of the files that still exist."""
+    times = []
+    for f in paths:
+        try:
+            times.append(os.path.getmtime(f))
+        except OSError:                           # removed or a dangling link: not code we run
+            pass
+    return max(times)
+
+
 ANALYSIS_SOURCES = _package_sources(HERE)       # the code a cached race comes from
-SRC_MTIME = max(os.path.getmtime(f) for f in ANALYSIS_SOURCES)
+SRC_MTIME = _newest(ANALYSIS_SOURCES)
 
 
 def race_cfg_hash(race):

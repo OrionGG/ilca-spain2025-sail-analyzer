@@ -137,6 +137,37 @@ class UseCasesDependOnEntitiesOnly(unittest.TestCase):
             self.assertFalse(use_case_may_import(bad), bad)
 
 
+class CacheStaleness(unittest.TestCase):
+    """Cached races are rebuilt when the code they come from changes: that has to cover every
+    circle the analysis code lives in, wherever later steps move it."""
+
+    def test_sources_cover_every_circle(self):
+        from sail_analyzer import app as A
+        want = {os.path.normcase(f) for f in glob.glob(os.path.join(glob.escape(support.PKG), "**", "*.py"),
+                                                        recursive=True)
+                if not os.path.basename(f).startswith(".")}
+        got = {os.path.normcase(f) for f in A.ANALYSIS_SOURCES}
+        self.assertEqual(sorted(want - got), [], "package code not counted for cache staleness")
+        for d in ("entities", "use_cases"):
+            self.assertTrue(any(os.sep + d + os.sep in f for f in got), d)
+
+    def test_walk_skips_only_the_package_data_folders(self):
+        import shutil
+        import tempfile
+        from sail_analyzer import app as A
+        root = tempfile.mkdtemp(prefix="sa_src_")
+        self.addCleanup(shutil.rmtree, root, True)
+        for rel in ("a.py", "x/data/b.py", "x/static/c.py", "x/cache/d.py", "data/e.py", "cache/f.py",
+                    "static/g.py", ".#lock.py", "x/__pycache__/h.py", "x/notes.txt"):
+            os.makedirs(os.path.dirname(os.path.join(root, rel)) or root, exist_ok=True)
+            open(os.path.join(root, rel), "w").close()
+        skip = [os.path.join(root, d) for d in ("cache", "data", "static")]
+        found = sorted(os.path.relpath(f, root).replace(os.sep, "/") for f in A._package_sources(root, skip))
+        self.assertEqual(found, ["a.py", "x/cache/d.py", "x/data/b.py", "x/static/c.py"])
+        self.assertEqual(A._newest([os.path.join(root, "a.py"), os.path.join(root, "gone.py")]),
+                         os.path.getmtime(os.path.join(root, "a.py")))
+
+
 class PackageEntryPoints(unittest.TestCase):
     def test_importable_as_a_package(self):
         import importlib
