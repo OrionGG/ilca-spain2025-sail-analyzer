@@ -48,13 +48,12 @@ class ManageRegattas:
         return self.repo.edit(add)
 
     def rename(self, rid, name):
-        if not name:
-            raise ValueError("Give the regatta a name.")
-
         def rename(reg):
             g = find_regatta(reg, rid)
             if g is None:
-                raise ValueError("unknown regatta")
+                raise NotFound("unknown regatta")
+            if not name:
+                raise ValueError("Give the regatta a name.")
             g["name"] = name
         self.repo.edit(rename)
 

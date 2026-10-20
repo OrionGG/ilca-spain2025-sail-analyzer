@@ -298,6 +298,12 @@ class RaceAnalysesTest(unittest.TestCase):
         self.assertIsNone(w.analyses.race("copa", "r01"))
         self.assertEqual(w.locks.taken, [])
 
+    def test_save_for_a_regatta_deleted_meanwhile(self):
+        w = self.w
+        w.repo.reg["regattas"] = []
+        with self.assertRaises(NotFound):
+            w.analyses.save("copa", race("r01"), {"race": "R01", "start_iso": "", "wind_from": 0, "boats": []}, "c")
+
     def test_save_writes_the_cache_before_the_registry(self):
         w = self.w
         order = []
@@ -332,8 +338,9 @@ class ManageRegattasTest(unittest.TestCase):
         self.assertEqual(w.repo.regatta("copa")["name"], "Copa 2025")
         with self.assertRaisesRegex(ValueError, "name"):
             w.regattas.rename("copa", "")
-        with self.assertRaisesRegex(ValueError, "unknown regatta"):
-            w.regattas.rename("nope", "X")
+        for name in ("X", ""):                              # an unknown regatta first
+            with self.assertRaises(NotFound):
+                w.regattas.rename("nope", name)
         with self.assertRaises(NotFound):
             w.regattas.delete("nope")
         w.regattas.delete("copa")
@@ -533,9 +540,17 @@ class OfficialResultsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "No official results"):
             rs.set_map("copa", [None, None, None])
 
-    def test_download_for_a_regatta_deleted_meanwhile(self):
-        with self.assertRaisesRegex(ValueError, "unknown regatta"):
-            self.results.download("nope", "https://results")
+    def test_unknown_regatta(self):
+        rs = self.results
+        for action in (lambda: rs.download("nope", "https://results"), lambda: rs.set_map("nope", []),
+                       lambda: rs.remove("nope")):
+            with self.assertRaises(NotFound):
+                action()
+        self.assertEqual(len(self.store.pages), 2)                  # nothing fetched
+        fetch = self.store.fetch                                    # deleted while its results are fetched
+        self.store.fetch = lambda url: (self.repo.reg.update(regattas=[]), fetch(url))[1]
+        with self.assertRaises(NotFound):
+            rs.download("copa", "https://results")
         self.assertEqual(self.store.files, {})
 
 

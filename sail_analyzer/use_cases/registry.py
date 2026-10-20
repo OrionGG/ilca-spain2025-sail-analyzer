@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from .errors import NotFound
+
 
 def slug(name):
     s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
@@ -28,7 +30,7 @@ def put_race(repo, rid, race_id, new):
     def fn(reg):
         rg = find_regatta(reg, rid)
         if rg is None:
-            raise ValueError("unknown regatta")
+            raise NotFound("unknown regatta")
         if new is None:
             rg["races"] = [r for r in rg["races"] if r["id"] != race_id]
             rg["seq"] = max(rg.get("seq", 0), race_num(race_id))   # keep the id retired

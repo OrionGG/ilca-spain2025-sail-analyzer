@@ -25,12 +25,14 @@ class OfficialResults:
     def download(self, rid, url):
         """Fetch and keep the results; a column keeps its race when the page is fetched again,
         new columns map to the race in their position when it's free. Returns (rows, columns)."""
+        if find_regatta(self.repo.load(), rid) is None:
+            raise NotFound("unknown regatta")          # before going to the network
         res = self.source.fetch(url)                  # network: outside any lock
 
         def save(reg):                                # the file and its registry entry together
             g = find_regatta(reg, rid)
-            if g is None:
-                raise ValueError("unknown regatta")
+            if g is None:                             # deleted while fetching
+                raise NotFound("unknown regatta")
             self.store.save(rid, {"races": res["races"], "rows": res["rows"]})
             default_map = [g["races"][i]["id"] if i < len(g["races"]) else None for i in range(len(res["races"]))]
             old = g.get("results") or {}
@@ -50,7 +52,9 @@ class OfficialResults:
         """Which race each results column is (None = not a tracked race)."""
         def set_map(reg):
             g = find_regatta(reg, rid)
-            if g is None or not g.get("results"):
+            if g is None:
+                raise NotFound("unknown regatta")
+            if not g.get("results"):
                 raise ValueError("No official results for this regatta.")
             ids = {r["id"] for r in g["races"]}
             if not isinstance(mp, list) or len(mp) != len(g["results"]["columns"]):
@@ -61,7 +65,8 @@ class OfficialResults:
     def remove(self, rid):
         def drop(reg):
             g = find_regatta(reg, rid)
-            if g is not None:
-                g.pop("results", None)
+            if g is None:
+                raise NotFound("unknown regatta")
+            g.pop("results", None)
             self.store.remove(rid)
         self.repo.edit(drop)
